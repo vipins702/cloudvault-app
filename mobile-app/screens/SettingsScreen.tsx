@@ -180,6 +180,45 @@ export default function SettingsScreen({ onLogout }: any) {
 
           <View style={styles.toggleRow}>
             <View style={styles.toggleLeft}>
+              <Ionicons name="cellular-outline" size={22} color="#94a3b8" />
+              <Text style={styles.toggleText}>Cellular Uploads</Text>
+            </View>
+            <Switch 
+              value={true} 
+              onValueChange={() => {}} 
+              trackColor={{ false: '#1e293b', true: '#3b82f6' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLeft}>
+              <Ionicons name="finger-print-outline" size={22} color="#94a3b8" />
+              <Text style={styles.toggleText}>Biometric App Lock</Text>
+            </View>
+            <Switch 
+              value={false} 
+              onValueChange={() => {}} 
+              trackColor={{ false: '#1e293b', true: '#3b82f6' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLeft}>
+              <Ionicons name="image-outline" size={22} color="#94a3b8" />
+              <Text style={styles.toggleText}>High Quality Preview</Text>
+            </View>
+            <Switch 
+              value={true} 
+              onValueChange={() => {}} 
+              trackColor={{ false: '#1e293b', true: '#3b82f6' }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLeft}>
               <Ionicons name="cloud-offline" size={22} color="#94a3b8" />
               <Text style={styles.toggleText}>Auto-Sync on Launch</Text>
             </View>

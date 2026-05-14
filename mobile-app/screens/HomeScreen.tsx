@@ -44,6 +44,9 @@ export default function HomeScreen() {
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [targetProvider, setTargetProvider] = useState('vercel-blob');
   const [providers, setProviders] = useState<string[]>([]);
+  
+  // Gallery Filters
+  const [selectedProviderFilter, setSelectedProviderFilter] = useState<string | null>(null);
 
   useEffect(() => {
     loadGallery();
@@ -170,12 +173,19 @@ export default function HomeScreen() {
   };
 
   const { visibleFiles, visibleFolders } = useMemo(() => {
-    const prefix = currentPath ? currentPath + '/' : '';
     const folders = new Set<string>();
     const files: any[] = [];
-    photos.forEach(p => {
+    
+    // 1. Filter by provider
+    const providerFiltered = selectedProviderFilter 
+      ? photos.filter(p => p.provider === selectedProviderFilter)
+      : photos;
+
+    // 2. Filter by current path
+    providerFiltered.forEach(p => {
       const path = p.path || '';
       if (currentPath) {
+        const prefix = currentPath + '/';
         if (path.startsWith(prefix)) {
           const rel = path.slice(prefix.length);
           const pts = rel.split('/');
@@ -189,7 +199,7 @@ export default function HomeScreen() {
       }
     });
     return { visibleFiles: files, visibleFolders: Array.from(folders).sort() };
-  }, [photos, currentPath]);
+  }, [photos, currentPath, selectedProviderFilter]);
 
   const getProviderBadge = (provider: string) => {
     const map: Record<string, { color: string; letter: string }> = {
@@ -314,6 +324,37 @@ export default function HomeScreen() {
           </>
         )}
       </View>
+
+      {/* Provider Filters */}
+      {!loading && !selectionMode && providers.length > 0 && (
+        <View style={styles.filterBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+            <TouchableOpacity 
+              style={[styles.filterChip, selectedProviderFilter === null && styles.filterChipActive]}
+              onPress={() => setSelectedProviderFilter(null)}
+            >
+              <Text style={[styles.filterChipText, selectedProviderFilter === null && styles.filterChipTextActive]}>All Assets</Text>
+            </TouchableOpacity>
+            {providers.map(p => (
+              <TouchableOpacity 
+                key={p}
+                style={[styles.filterChip, selectedProviderFilter === p && styles.filterChipActive]}
+                onPress={() => setSelectedProviderFilter(p)}
+              >
+                <Ionicons 
+                  name={p === 'aws-s3' ? 'logo-amazon' : p === 'google-photos' ? 'logo-google' : p === 'google-drive' ? 'logo-google' : p === 'dropbox' ? 'logo-dropbox' : 'triangle'} 
+                  size={14} 
+                  color={selectedProviderFilter === p ? '#fff' : '#64748b'} 
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.filterChipText, selectedProviderFilter === p && styles.filterChipTextActive]}>
+                  {p === 'aws-s3' ? 'AWS S3' : p === 'google-photos' ? 'Photos' : p === 'google-drive' ? 'Drive' : p === 'dropbox' ? 'Dropbox' : 'Vercel'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.centered}>
@@ -477,6 +518,37 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e293b', 
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#334155'
+  },
+  filterBar: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b'
+  },
+  filterScroll: {
+    paddingHorizontal: 16,
+    gap: 8
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  filterChipActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb'
+  },
+  filterChipText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '600'
+  },
+  filterChipTextActive: {
+    color: '#fff'
   },
   list: { padding: GAP / 2 },
   item: { 

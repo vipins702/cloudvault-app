@@ -170,6 +170,14 @@ export default function CloudConnectionsScreen() {
       desc: 'Sync your Google Photos library', authType: 'oauth' 
     },
     { 
+      id: 'google-drive', name: 'Google Drive', icon: 'logo-google', color: '#0F9D58', 
+      desc: 'Backup files to Google Drive', authType: 'coming_soon' 
+    },
+    { 
+      id: 'dropbox', name: 'Dropbox', icon: 'logo-dropbox', color: '#0061FF', 
+      desc: 'Sync with Dropbox workspace', authType: 'coming_soon' 
+    },
+    { 
       id: 'vercel-blob', name: 'Vercel Blob', icon: 'triangle', color: '#ffffff', 
       desc: 'Enterprise high-speed storage', authType: 'api',
       fields: [{ id: 'token', label: 'Vercel API Token', secure: true }]

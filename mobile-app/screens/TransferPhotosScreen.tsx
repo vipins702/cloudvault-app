@@ -172,20 +172,26 @@ export default function TransferPhotosScreen() {
             {/* Target Selection */}
             <Text style={styles.sectionTitle}>2. Select Target Provider</Text>
             <View style={styles.providerSelect}>
-              <TouchableOpacity 
-                style={[styles.providerBtn, targetProvider === 'vercel-blob' && styles.providerBtnActive]}
-                onPress={() => setTargetProvider('vercel-blob')}
-              >
-                <Ionicons name="triangle" size={20} color={targetProvider === 'vercel-blob' ? '#fff' : '#64748b'} />
-                <Text style={[styles.providerText, targetProvider === 'vercel-blob' && styles.providerTextActive]}>Vercel Blob</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.providerBtn, targetProvider === 'aws-s3' && styles.providerBtnActive]}
-                onPress={() => setTargetProvider('aws-s3')}
-              >
-                <Ionicons name="logo-amazon" size={20} color={targetProvider === 'aws-s3' ? '#fff' : '#64748b'} />
-                <Text style={[styles.providerText, targetProvider === 'aws-s3' && styles.providerTextActive]}>AWS S3</Text>
-              </TouchableOpacity>
+              {providers.length === 0 ? (
+                <Text style={styles.emptyText}>No providers connected.</Text>
+              ) : (
+                providers.map(p => (
+                  <TouchableOpacity 
+                    key={p}
+                    style={[styles.providerBtn, targetProvider === p && styles.providerBtnActive]}
+                    onPress={() => setTargetProvider(p)}
+                  >
+                    <Ionicons 
+                      name={p === 'aws-s3' ? 'logo-amazon' : p === 'google-photos' ? 'logo-google' : p === 'google-drive' ? 'logo-google' : p === 'dropbox' ? 'logo-dropbox' : 'triangle'} 
+                      size={20} 
+                      color={targetProvider === p ? '#fff' : '#64748b'} 
+                    />
+                    <Text style={[styles.providerText, targetProvider === p && styles.providerTextActive]}>
+                      {p === 'aws-s3' ? 'AWS S3' : p === 'google-photos' ? 'Google Photos' : p === 'google-drive' ? 'Google Drive' : p === 'dropbox' ? 'Dropbox' : 'Vercel Blob'}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )}
             </View>
 
             {/* Visual Tunnel */}
