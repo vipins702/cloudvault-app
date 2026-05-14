@@ -32,6 +32,11 @@ const getRedirectUri = (req) => {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
+// --- HEALTH CHECK ---
+app.get('/', (req, res) => {
+  res.json({ status: 'Online', message: 'CloudVault API is running on Vercel' });
+});
+
 // --- UTILS ---
 const hashPassword = (password) => Buffer.from(password).toString('base64');
 
