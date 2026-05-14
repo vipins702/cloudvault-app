@@ -23,17 +23,9 @@ export const DbService = {
         return [];
       }
       
-      // Map backend response (Vercel Blob) to internal CloudAsset format
-      return blobs.map((b: any) => ({
-        id: b.url,
-        url: b.url,
-        name: b.pathname.split('/').pop(),
-        path: b.pathname || '',
-        provider: 'vercel-blob',
-        size: b.size,
-        date: b.uploadedAt,
-        type: b.contentType?.startsWith('video') ? 'video' : 'image'
-      }));
+      // The new SaaS Master Backend returns fully unified and formatted CloudAsset objects.
+      // We no longer need to map over raw Vercel properties like `pathname`.
+      return blobs;
     } catch (err) {
       console.error('API Bridge Error:', err);
       return [];
