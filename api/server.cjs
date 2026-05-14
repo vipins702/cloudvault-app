@@ -461,7 +461,11 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
         throw new Error('Invalid target credentials');
       }
       
-      const decryptedToken = SaaSVault.decrypt(creds.token);
+      // Google Photos OAuth saves the raw token in `access_token`
+      const decryptedToken = creds.access_token || creds.token;
+      if (!decryptedToken) {
+         throw new Error('Google Photos access token is missing');
+      }
       
       console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
       // Step 1: Upload bytes to get Upload Token
