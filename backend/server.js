@@ -187,14 +187,31 @@ app.post('/api/auth/link-cloud', authenticateToken, async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
     if (!tenantId) throw new Error("Tenant ID missing in token");
-    const encryptedToken = SaaSVault.encrypt(token);
-    const creds = JSON.stringify({ token: encryptedToken });
+    
+    // Web app saves Vercel credentials literally as stringified JSON: '{"token":"..."}'
+    // For mobile API inputs, the 'token' variable is already a JSON string of configValues
+    // We will save it exactly as the web app expects.
+    const credsEncrypted = typeof token === 'string' ? token : JSON.stringify({ token });
+    
+    const now = new Date().toISOString();
+    
     await sql`
-      INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, updated_at)
-      VALUES (${crypto.randomUUID()}, ${tenantId}, ${provider}, ${name}, ${creds}, true, ${new Date().toISOString()})
+      INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, metadata, created_at, updated_at)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${provider}, ${name}, ${credsEncrypted}, true, '{}'::jsonb, ${now}, ${now})
+      ON CONFLICT (id) DO UPDATE SET 
+        credentials_encrypted = EXCLUDED.credentials_encrypted,
+        updated_at = EXCLUDED.updated_at
     `;
+    
+    // Save audit log matching the web app schema
+    await sql`
+      INSERT INTO audit_logs (id, tenant_id, user_id, action, target, metadata, created_at)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'LINK_CLOUD', 'connection', ${JSON.stringify({ provider })}, ${now})
+    `;
+    
     res.json({ success: true });
   } catch (err) {
+    console.error('Link Cloud Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
