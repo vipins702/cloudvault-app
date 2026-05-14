@@ -25,7 +25,8 @@ const getRedirectUri = (req) => {
     return process.env.GOOGLE_REDIRECT_URI;
   }
   const host = req.get('host');
-  const protocol = req.protocol;
+  // Force https for Vercel or if the protocol is already https
+  const protocol = host.includes('vercel.app') ? 'https' : req.protocol;
   return `${protocol}://${host}/auth/google/callback`;
 };
 
