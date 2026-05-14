@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { DbService } from '../utils/db';
 import { Storage } from '../utils/storage';
 import { BACKEND_URL } from '../utils/constants';
@@ -36,9 +38,87 @@ export default function HomeScreen() {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Upload State
+  const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [targetProvider, setTargetProvider] = useState('vercel-blob');
+  const [providers, setProviders] = useState<string[]>([]);
+
   useEffect(() => {
     loadGallery();
+    fetchProviders();
   }, []);
+
+  const fetchProviders = async () => {
+    try {
+      const token = await Storage.getItem('authToken');
+      const connRes = await fetch(`${BACKEND_URL}/api/connections`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const conns = await connRes.json();
+      if (Array.isArray(conns)) {
+        setProviders(conns.map(c => c.provider));
+      }
+    } catch (e) {
+      console.error('Failed to load providers', e);
+    }
+  };
+
+  const pickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setSelectedImageUri(result.assets[0].uri);
+      setUploadModalVisible(true);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedImageUri) return;
+    setIsUploading(true);
+
+    try {
+      const token = await Storage.getItem('authToken');
+      
+      // Read file as base64
+      const base64Data = await FileSystem.readAsStringAsync(selectedImageUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const fileName = selectedImageUri.split('/').pop() || `upload_${Date.now()}.jpg`;
+
+      const res = await fetch(`${BACKEND_URL}/api/files/upload`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fileName,
+          contentType: 'image/jpeg',
+          base64Data,
+          targetProviderId: targetProvider,
+          folder: currentPath || ''
+        })
+      });
+
+      if (!res.ok) throw new Error('Upload failed');
+      
+      Alert.alert('Success', 'File uploaded securely to ' + targetProvider);
+      setUploadModalVisible(false);
+      setSelectedImageUri(null);
+      await loadGallery();
+    } catch (e: any) {
+      Alert.alert('Upload Error', e.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const loadGallery = async () => {
     setLoading(true);
@@ -302,6 +382,67 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Upload FAB */}
+      {!selectionMode && (
+        <TouchableOpacity style={styles.fab} onPress={pickImage}>
+          <Ionicons name="add" size={32} color="#fff" />
+        </TouchableOpacity>
+      )}
+
+      {/* Upload Settings Modal */}
+      <Modal visible={uploadModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.uploadModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Upload Asset</Text>
+              <TouchableOpacity onPress={() => setUploadModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedImageUri && (
+              <Image source={{ uri: selectedImageUri }} style={styles.uploadPreview} />
+            )}
+
+            <Text style={styles.modalLabel}>Select Target Cloud</Text>
+            <View style={styles.providerSelect}>
+              {providers.length === 0 ? (
+                <Text style={styles.emptyText}>No clouds connected. Link one in Settings.</Text>
+              ) : (
+                providers.map(p => (
+                  <TouchableOpacity 
+                    key={p}
+                    style={[styles.providerBtn, targetProvider === p && styles.providerBtnActive]}
+                    onPress={() => setTargetProvider(p)}
+                  >
+                    <Ionicons 
+                      name={p === 'aws-s3' ? 'logo-amazon' : p === 'google-photos' ? 'logo-google' : 'triangle'} 
+                      size={20} 
+                      color={targetProvider === p ? '#fff' : '#64748b'} 
+                    />
+                    <Text style={[styles.providerText, targetProvider === p && styles.providerTextActive]}>
+                      {p === 'aws-s3' ? 'AWS S3' : p === 'google-photos' ? 'Google Photos' : 'Vercel Blob'}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.uploadBtn, (isUploading || providers.length === 0) && styles.btnDisabled]} 
+              onPress={handleUpload}
+              disabled={isUploading || providers.length === 0}
+            >
+              {isUploading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.uploadBtnText}>Upload Now</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -421,4 +562,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 
   },
   metaText: { color: '#94a3b8', fontSize: 11, marginLeft: 4, fontWeight: '600' },
+  // FAB & Upload Modal
+  fab: {
+    position: 'absolute', bottom: 20, right: 20,
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: '#3b82f6',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12,
+    elevation: 8
+  },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end'
+  },
+  uploadModal: {
+    backgroundColor: '#1e293b', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20
+  },
+  modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  uploadPreview: {
+    width: '100%', height: 180, borderRadius: 16, marginBottom: 20,
+    borderWidth: 1, borderColor: '#334155'
+  },
+  modalLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase' },
+  providerSelect: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  providerBtn: { 
+    flexDirection: 'row', alignItems: 'center', 
+    backgroundColor: '#0f172a', 
+    paddingHorizontal: 16, paddingVertical: 12, 
+    borderRadius: 12, borderWidth: 1, borderColor: '#334155' 
+  },
+  providerBtnActive: { backgroundColor: 'rgba(59, 130, 246, 0.1)', borderColor: '#3b82f6' },
+  providerText: { color: '#64748b', fontWeight: 'bold', marginLeft: 8 },
+  providerTextActive: { color: '#fff' },
+  uploadBtn: { 
+    backgroundColor: '#3b82f6', padding: 16, borderRadius: 16, alignItems: 'center' 
+  },
+  btnDisabled: { backgroundColor: '#334155', opacity: 0.7 },
+  uploadBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });

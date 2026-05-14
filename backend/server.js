@@ -267,6 +267,82 @@ app.delete('/api/connections/:provider', authenticateToken, async (req, res) => 
 
 // ========== TRANSFER & BULK ROUTES (SaaS Master Engine) ==========
 
+app.post('/api/files/upload', authenticateToken, async (req, res) => {
+  const { fileName, contentType, base64Data, targetProviderId, folder } = req.body;
+  const tenantId = req.user.tenantId;
+
+  try {
+    if (!base64Data) throw new Error("No file data provided");
+
+    // 1. Get Target Provider
+    const targetConns = await sql`SELECT * FROM storage_connections WHERE provider = ${targetProviderId} AND tenant_id = ${tenantId}`;
+    const targetConn = targetConns[0];
+    if (!targetConn) throw new Error('Target provider not connected');
+
+    const buffer = Buffer.from(base64Data, 'base64');
+    let newUrl = '';
+    let newKey = '';
+
+    // 2. Upload to Vercel Blob
+    if (targetProviderId === 'vercel-blob') {
+      const creds = JSON.parse(targetConn.credentials_encrypted);
+      const rawToken = creds.token || '';
+      const match = rawToken.match(/(vercel_blob_[a-zA-Z0-9_]+)/);
+      const token = match ? match[1] : rawToken.trim();
+
+      const pathname = folder ? `${folder}/${fileName}` : fileName;
+      
+      console.log(`[UploadEngine] Uploading ${pathname} to Vercel Blob...`);
+      const uploadResponse = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(pathname)}?v=1`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': contentType || 'application/octet-stream',
+        },
+        body: buffer
+      });
+
+      if (!uploadResponse.ok) throw new Error('Failed to upload to target provider');
+      const uploadData = await uploadResponse.json();
+      newUrl = uploadData.url;
+      newKey = uploadData.pathname;
+    } else {
+      throw new Error(`Upload to ${targetProviderId} not yet implemented on master backend`);
+    }
+
+    // 3. Insert into Database
+    const now = new Date().toISOString();
+    const fileId = crypto.randomUUID();
+    
+    // Using base64 length roughly gives size in bytes
+    const sizeBytes = Math.round((base64Data.length * 3) / 4);
+
+    await sql`
+      INSERT INTO files (
+        id, tenant_id, connection_id, storage_key, storage_url, 
+        name, content_type, size_bytes, folder, 
+        uploaded_by, uploaded_at
+      )
+      VALUES (
+        ${fileId}, ${tenantId}, ${targetConn.id}, ${newKey}, ${newUrl},
+        ${fileName}, ${contentType}, ${sizeBytes}, ${folder || ''},
+        ${req.user.id}, ${now}
+      )
+    `;
+
+    // Audit log
+    await sql`
+      INSERT INTO audit_logs (id, tenant_id, user_id, action, target, metadata, created_at)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'UPLOAD_FILE', 'storage', ${JSON.stringify({ name: fileName })}, ${now})
+    `;
+
+    res.json({ success: true, file: { id: fileId, url: newUrl } });
+  } catch (err) {
+    console.error('[UploadEngine] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/files/delete', authenticateToken, async (req, res) => {
   const { fileIds } = req.body;
   const tenantId = req.user.tenantId;
