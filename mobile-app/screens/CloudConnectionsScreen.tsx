@@ -7,7 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   Linking,
   StatusBar,
   AppState,
@@ -16,6 +15,7 @@ import {
   TextInput,
   KeyboardAvoidingView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Storage } from '../utils/storage';
 import { BACKEND_URL } from '../utils/constants';
@@ -242,7 +242,7 @@ export default function CloudConnectionsScreen() {
                 <View style={styles.statusBox}>
                   {isConnected ? (
                     <View style={styles.connectedBadge}>
-                      <Ionicons name="checkmark-shield" size={14} color="#10b981" />
+                      <Ionicons name="shield-checkmark" size={14} color="#10b981" />
                       <Text style={styles.connectedText}>LINKED</Text>
                     </View>
                   ) : (

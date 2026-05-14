@@ -7,12 +7,12 @@ import {
   ScrollView,
   Switch,
   Alert,
-  SafeAreaView,
   ActivityIndicator,
   Modal,
   FlatList,
   Image
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Storage } from '../utils/storage';
 import { BACKEND_URL } from '../utils/constants';
