@@ -8,8 +8,8 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const { neon } = require('@neondatabase/serverless');
 const jwt = require('jsonwebtoken');
-const SaaSVault = require('./utils/crypto');
-const AIService = require('./services/ai-service');
+const SaaSVault = require('./utils/crypto.cjs');
+const AIService = require('./services/ai-service.cjs');
 
 const app = express();
 const port = process.env.PORT || 5000;
