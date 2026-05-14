@@ -180,6 +180,19 @@ app.post('/api/auth/link-cloud', authenticateToken, async (req, res) => {
   }
 });
 
+// ========== DISCONNECT PROVIDER ==========
+
+app.delete('/api/connections/:provider', authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const provider = req.params.provider;
+    await sql`DELETE FROM storage_connections WHERE tenant_id = ${tenantId} AND provider = ${provider}`;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ========== AI ROUTES ==========
 
 app.get('/api/ai/duplicates', authenticateToken, async (req, res) => {
@@ -191,18 +204,24 @@ app.get('/api/ai/duplicates', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== GOOGLE OAUTH PROXY ==========
+// ========== GOOGLE OAUTH PROXY (END-TO-END) ==========
 
 app.get('/auth/google', (req, res) => {
   const redirectUri = getRedirectUri(req);
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/photoslibrary.readonly&access_type=offline&prompt=consent`;
+  // Pass the user's JWT token through Google's state param so we know who to link
+  const userToken = req.query.token || '';
+  const state = Buffer.from(JSON.stringify({ jwt: userToken })).toString('base64');
+  
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/photoslibrary.readonly&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
   res.redirect(url);
 });
 
 app.get('/auth/google/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   const redirectUri = getRedirectUri(req);
+  
   try {
+    // 1. Exchange auth code for tokens
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -218,14 +237,51 @@ app.get('/auth/google/callback', async (req, res) => {
     const tokens = await response.json();
 
     if (!tokens.access_token) {
-      return res.status(400).send('Google OAuth failed: ' + JSON.stringify(tokens));
+      return res.status(400).send(`
+        <html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
+          <div style="text-align:center"><h1>❌ Connection Failed</h1><p style="color:#94a3b8">Google OAuth error: ${JSON.stringify(tokens)}</p></div>
+        </body></html>`);
     }
 
-    const encryptedToken = SaaSVault.encrypt(tokens.access_token);
-    const deepLink = `cloudvault://auth?token=${encodeURIComponent(encryptedToken)}&provider=google-photos`;
+    // 2. Decode the state to get the user's JWT
+    let userPayload = null;
+    if (state) {
+      try {
+        const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
+        if (stateData.jwt) {
+          userPayload = jwt.verify(stateData.jwt, JWT_SECRET);
+        }
+      } catch (e) {
+        console.error('State decode error:', e.message);
+      }
+    }
 
-    // Send a success page that works on BOTH web and mobile
-    res.send(`<!DOCTYPE html>
+    // 3. Save the connection to DB if we have a valid user
+    let savedToDB = false;
+    if (userPayload && userPayload.tenantId) {
+      try {
+        const encryptedAccessToken = SaaSVault.encrypt(tokens.access_token);
+        const encryptedRefreshToken = tokens.refresh_token ? SaaSVault.encrypt(tokens.refresh_token) : null;
+        const creds = JSON.stringify({ 
+          token: encryptedAccessToken,
+          refresh_token: encryptedRefreshToken,
+          expires_at: Date.now() + (tokens.expires_in * 1000)
+        });
+
+        // Upsert: delete old connection, insert fresh one
+        await sql\`DELETE FROM storage_connections WHERE tenant_id = \${userPayload.tenantId} AND provider = 'google-photos'\`;
+        await sql\`
+          INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, updated_at)
+          VALUES (\${crypto.randomUUID()}, \${userPayload.tenantId}, 'google-photos', 'Google Photos', \${creds}, true, \${new Date().toISOString()})
+        \`;
+        savedToDB = true;
+      } catch (dbErr) {
+        console.error('DB save error:', dbErr.message);
+      }
+    }
+
+    // 4. Return a premium success page
+    res.send(\`<!DOCTYPE html>
       <html><head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -234,27 +290,33 @@ app.get('/auth/google/callback', async (req, res) => {
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
           .card { text-align: center; padding: 50px; max-width: 420px; }
-          .icon { font-size: 64px; margin-bottom: 20px; }
-          h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; }
-          p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 30px; }
-          .badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 8px 20px; border-radius: 30px; font-weight: 700; font-size: 14px; letter-spacing: 1px; }
+          .icon { font-size: 64px; margin-bottom: 20px; animation: pulse 2s infinite; }
+          @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+          h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; background: linear-gradient(135deg, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+          p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
+          .badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 10px 24px; border-radius: 30px; font-weight: 700; font-size: 14px; letter-spacing: 1px; border: 1px solid rgba(16,185,129,0.3); }
+          .db-status { margin-top: 20px; padding: 12px 20px; border-radius: 12px; font-size: 13px; }
+          .db-ok { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+          .db-warn { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
           .info { color: #475569; font-size: 13px; margin-top: 30px; }
         </style>
       </head><body>
         <div class="card">
           <div class="icon">🔗</div>
           <h1>Google Photos Connected!</h1>
-          <p>Your Google Photos library has been securely linked to CloudVault. You can now close this window and return to the app.</p>
+          <p>Your Google Photos library has been securely linked to CloudVault with AES-256 encryption.</p>
           <div class="badge">✓ INTEGRATION COMPLETE</div>
-          <p class="info">If the app didn't open automatically, go back to CloudVault on your device.</p>
+          <div class="db-status \${savedToDB ? 'db-ok' : 'db-warn'}">
+            \${savedToDB ? '🔒 Credentials encrypted & saved to your vault' : '⚠️ Connected but not saved — please log in first, then reconnect'}
+          </div>
+          <p class="info">You can now close this window and return to the CloudVault app.</p>
         </div>
-        <script>
-          // Try to open the mobile app via deep link
-          try { window.location.href = "${deepLink}"; } catch(e) {}
-        </script>
-      </body></html>`);
+      </body></html>\`);
   } catch (err) {
-    res.status(500).send('OAuth Handshake Failed: ' + err.message);
+    res.status(500).send(\`
+      <html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center"><h1>❌ Connection Failed</h1><p style="color:#ef4444">\${err.message}</p></div>
+      </body></html>\`);
   }
 });
 
