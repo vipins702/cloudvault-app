@@ -33,6 +33,9 @@ const getRedirectUri = (req) => {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
+// --- STATIC FILES (Privacy Policy, Terms of Service) ---
+app.use(express.static(path.join(__dirname, 'public')));
+
 // --- HEALTH CHECK ---
 app.get('/', (req, res) => {
   res.json({ status: 'Online', message: 'CloudVault API is running on Vercel' });
@@ -219,7 +222,37 @@ app.get('/auth/google/callback', async (req, res) => {
     }
 
     const encryptedToken = SaaSVault.encrypt(tokens.access_token);
-    res.redirect(`cloudvault://auth?token=${encodeURIComponent(encryptedToken)}&provider=google-photos`);
+    const deepLink = `cloudvault://auth?token=${encodeURIComponent(encryptedToken)}&provider=google-photos`;
+
+    // Send a success page that works on BOTH web and mobile
+    res.send(`<!DOCTYPE html>
+      <html><head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CloudVault - Connected!</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+          .card { text-align: center; padding: 50px; max-width: 420px; }
+          .icon { font-size: 64px; margin-bottom: 20px; }
+          h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; }
+          p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 30px; }
+          .badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 8px 20px; border-radius: 30px; font-weight: 700; font-size: 14px; letter-spacing: 1px; }
+          .info { color: #475569; font-size: 13px; margin-top: 30px; }
+        </style>
+      </head><body>
+        <div class="card">
+          <div class="icon">🔗</div>
+          <h1>Google Photos Connected!</h1>
+          <p>Your Google Photos library has been securely linked to CloudVault. You can now close this window and return to the app.</p>
+          <div class="badge">✓ INTEGRATION COMPLETE</div>
+          <p class="info">If the app didn't open automatically, go back to CloudVault on your device.</p>
+        </div>
+        <script>
+          // Try to open the mobile app via deep link
+          try { window.location.href = "${deepLink}"; } catch(e) {}
+        </script>
+      </body></html>`);
   } catch (err) {
     res.status(500).send('OAuth Handshake Failed: ' + err.message);
   }
