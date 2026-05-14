@@ -1,12 +1,10 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "cloudvault-backend",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "1.0.0",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.987.0",
