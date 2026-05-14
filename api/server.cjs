@@ -453,6 +453,62 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
       const uploadData = await uploadResponse.json();
       newUrl = uploadData.url;
       newKey = uploadData.pathname;
+    } else if (targetProviderId === 'google-photos') {
+      let creds;
+      try {
+        creds = JSON.parse(targetConn.credentials_encrypted);
+      } catch (e) {
+        throw new Error('Invalid target credentials');
+      }
+      
+      const decryptedToken = SaaSVault.decrypt(creds.token);
+      
+      console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
+      // Step 1: Upload bytes to get Upload Token
+      const uploadBytesRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${decryptedToken}`,
+          'Content-Type': 'application/octet-stream',
+          'X-Goog-Upload-Content-Type': file.content_type || 'image/jpeg',
+          'X-Goog-Upload-Protocol': 'raw'
+        },
+        body: sourceResponse.body,
+        duplex: 'half'
+      });
+      
+      if (!uploadBytesRes.ok) {
+        const errText = await uploadBytesRes.text();
+        throw new Error('Failed to upload bytes to Google Photos: ' + errText);
+      }
+      const uploadToken = await uploadBytesRes.text();
+      
+      console.log(`[TransferEngine] Creating Media Item in Google Photos...`);
+      // Step 2: Create media item using Upload Token
+      const createItemRes = await fetch('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${decryptedToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          newMediaItems: [{
+            description: file.name,
+            simpleMediaItem: { uploadToken }
+          }]
+        })
+      });
+      
+      if (!createItemRes.ok) throw new Error('Failed to create media item in Google Photos');
+      const createData = await createItemRes.json();
+      
+      if (!createData.newMediaItemResults || !createData.newMediaItemResults[0].mediaItem) {
+        throw new Error('Google Photos API did not return media item');
+      }
+      
+      const mediaItem = createData.newMediaItemResults[0].mediaItem;
+      newUrl = mediaItem.baseUrl; // Google Photos gives a temporary baseUrl that lasts ~60 mins
+      newKey = mediaItem.id;
     } else {
       throw new Error(`Transfer to ${targetProviderId} not yet implemented on master backend`);
     }

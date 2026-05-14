@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  Image,
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
@@ -16,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { DbService } from '../utils/db';
@@ -245,7 +245,13 @@ export default function HomeScreen() {
           </View>
         ) : (
           <View style={styles.photoContent}>
-            <Image source={{ uri: item.url }} style={[styles.image, isSelected && { opacity: 0.6 }]} />
+            <Image 
+              source={{ uri: item.url }} 
+              style={[styles.image, isSelected && { opacity: 0.6 }]} 
+              contentFit="cover"
+              cachePolicy="disk"
+              transition={200}
+            />
             <View style={styles.imageOverlay} />
             {item.provider && (
               <View style={[styles.badge, { backgroundColor: getProviderBadge(item.provider).color }]}>
@@ -428,7 +434,12 @@ export default function HomeScreen() {
               </TouchableOpacity>
             )}
 
-            <Image source={{ uri: selectedPhoto?.url }} style={styles.fullImage} resizeMode="contain" />
+            <Image 
+              source={{ uri: selectedPhoto?.url }} 
+              style={styles.fullImage} 
+              contentFit="contain"
+              cachePolicy="disk"
+            />
 
             {/* Next Button */}
             {!isLastPhoto && (
@@ -479,7 +490,11 @@ export default function HomeScreen() {
             </View>
 
             {selectedImageUri && (
-              <Image source={{ uri: selectedImageUri }} style={styles.uploadPreview} />
+              <Image 
+                source={{ uri: selectedImageUri }} 
+                style={styles.uploadPreview} 
+                contentFit="cover" 
+              />
             )}
 
             <Text style={styles.modalLabel}>Select Target Cloud</Text>
