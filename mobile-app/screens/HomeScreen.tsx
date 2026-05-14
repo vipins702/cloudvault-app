@@ -10,23 +10,23 @@ import {
   ActivityIndicator,
   StatusBar,
   Modal,
-  Alert,
-  BlurView
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DbService } from '../utils/db';
-import { Storage } from '../utils/storage';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const COLUMN_COUNT = 3;
-const ITEM_SIZE = (width - 4) / COLUMN_COUNT;
+const GAP = 2;
+const ITEM_SIZE = (width - GAP * (COLUMN_COUNT + 1)) / COLUMN_COUNT;
 
 export default function HomeScreen() {
   const [photos, setPhotos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<any>(null);
   const [currentPath, setCurrentPath] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
     loadGallery();
@@ -66,23 +66,40 @@ export default function HomeScreen() {
     return { visibleFiles: files, visibleFolders: Array.from(folders).sort() };
   }, [photos, currentPath]);
 
+  const getProviderBadge = (provider: string) => {
+    const map: Record<string, { color: string; letter: string }> = {
+      'google-photos': { color: '#4285F4', letter: 'G' },
+      'vercel-blob': { color: '#000', letter: 'V' },
+      'aws-s3': { color: '#FF9900', letter: 'S' },
+      'icloud': { color: '#999', letter: 'i' },
+    };
+    return map[provider] || { color: '#3b82f6', letter: '?' };
+  };
+
   const renderItem = ({ item }: { item: any }) => {
     const isFolder = typeof item === 'string';
     return (
       <TouchableOpacity 
         style={styles.item}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
         onPress={() => isFolder ? setCurrentPath(currentPath ? `${currentPath}/${item}` : item) : setSelectedPhoto(item)}
       >
         {isFolder ? (
           <View style={styles.folderContent}>
-            <Ionicons name="folder" size={52} color="#3b82f6" />
+            <View style={styles.folderIcon}>
+              <Ionicons name="folder" size={28} color="#3b82f6" />
+            </View>
             <Text style={styles.folderName} numberOfLines={1}>{item}</Text>
           </View>
         ) : (
           <View style={styles.photoContent}>
             <Image source={{ uri: item.url }} style={styles.image} />
-            <View style={styles.badge}><Text style={styles.badgeText}>{item.provider[0].toUpperCase()}</Text></View>
+            <View style={styles.imageOverlay} />
+            {item.provider && (
+              <View style={[styles.badge, { backgroundColor: getProviderBadge(item.provider).color }]}>
+                <Text style={styles.badgeText}>{getProviderBadge(item.provider).letter}</Text>
+              </View>
+            )}
           </View>
         )}
       </TouchableOpacity>
@@ -92,27 +109,46 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
+      
+      {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Asset Explorer</Text>
+        <View style={styles.headerLeft}>
           {currentPath ? (
-            <TouchableOpacity onPress={() => setCurrentPath('')} style={styles.breadcrumb}>
-              <Ionicons name="chevron-back" size={14} color="#60a5fa" />
-              <Text style={styles.breadcrumbText}>Root / {currentPath}</Text>
+            <TouchableOpacity onPress={() => setCurrentPath('')} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={20} color="#3b82f6" />
             </TouchableOpacity>
-          ) : (
-            <Text style={styles.subtitle}>Unified Multi-Cloud Vault</Text>
-          )}
+          ) : null}
+          <View>
+            <Text style={styles.headerTitle}>
+              {currentPath ? currentPath.split('/').pop() : 'Gallery'}
+            </Text>
+            <Text style={styles.subtitle}>
+              {currentPath 
+                ? `${visibleFiles.length} files • ${visibleFolders.length} folders`
+                : `${photos.length} assets across all clouds`
+              }
+            </Text>
+          </View>
         </View>
-        <TouchableOpacity onPress={loadGallery} style={styles.refreshBtn}>
-          <Ionicons name="refresh" size={22} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.actionBtn} 
+            onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+          >
+            <Ionicons name={viewMode === 'grid' ? 'grid' : 'list'} size={18} color="#94a3b8" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={loadGallery} style={styles.actionBtn}>
+            <Ionicons name="refresh" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={styles.loadingText}>Syncing Assets...</Text>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+            <Text style={styles.loadingText}>Syncing vault assets...</Text>
+          </View>
         </View>
       ) : (
         <FlatList
@@ -124,22 +160,53 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="cloud-offline-outline" size={64} color="#334155" />
-              <Text style={styles.emptyText}>No assets found in this vault.</Text>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="cloud-offline-outline" size={48} color="#334155" />
+              </View>
+              <Text style={styles.emptyTitle}>No Assets Found</Text>
+              <Text style={styles.emptyText}>Connect a cloud provider to start viewing your photos here.</Text>
             </View>
           }
         />
       )}
 
+      {/* Full-screen Photo Viewer */}
       <Modal visible={!!selectedPhoto} transparent animationType="fade">
         <View style={styles.viewer}>
-          <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedPhoto(null)}>
-            <Ionicons name="close" size={32} color="#fff" />
-          </TouchableOpacity>
+          <View style={styles.viewerHeader}>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedPhoto(null)}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.viewerActions}>
+              <TouchableOpacity style={styles.viewerAction}>
+                <Ionicons name="share-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.viewerAction}>
+                <Ionicons name="download-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <Image source={{ uri: selectedPhoto?.url }} style={styles.fullImage} resizeMode="contain" />
+
           <View style={styles.viewerFooter}>
-            <Text style={styles.fileName}>{selectedPhoto?.name}</Text>
-            <Text style={styles.fileMeta}>{selectedPhoto?.provider} • {(selectedPhoto?.size / 1024).toFixed(1)} KB</Text>
+            <View style={styles.footerInfo}>
+              <Text style={styles.fileName} numberOfLines={1}>{selectedPhoto?.name}</Text>
+              <View style={styles.metaRow}>
+                {selectedPhoto?.provider && (
+                  <View style={styles.metaBadge}>
+                    <Ionicons name="cloud" size={10} color="#3b82f6" />
+                    <Text style={styles.metaText}>{selectedPhoto?.provider}</Text>
+                  </View>
+                )}
+                {selectedPhoto?.size && (
+                  <View style={styles.metaBadge}>
+                    <Ionicons name="document" size={10} color="#64748b" />
+                    <Text style={styles.metaText}>{(selectedPhoto?.size / 1024).toFixed(1)} KB</Text>
+                  </View>
+                )}
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -151,35 +218,100 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
   header: { 
     paddingHorizontal: 20, 
-    paddingVertical: 15, 
+    paddingVertical: 14, 
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'space-between',
-    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155'
+    borderBottomColor: '#1e293b'
   },
-  headerTitle: { color: '#fff', fontSize: 24, fontWeight: '800' },
-  subtitle: { color: '#64748b', fontSize: 13, marginTop: 2 },
-  breadcrumb: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  breadcrumbText: { color: '#60a5fa', fontSize: 13, fontWeight: '600' },
-  refreshBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#334155', justifyContent: 'center', alignItems: 'center' },
-  list: { padding: 1 },
-  item: { width: ITEM_SIZE, height: ITEM_SIZE, margin: 0.5, backgroundColor: '#1e293b' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  backBtn: { 
+    width: 36, height: 36, borderRadius: 12, 
+    backgroundColor: 'rgba(59,130,246,0.1)', 
+    justifyContent: 'center', alignItems: 'center', 
+    marginRight: 12 
+  },
+  headerTitle: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  subtitle: { color: '#475569', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  headerActions: { flexDirection: 'row', gap: 8 },
+  actionBtn: { 
+    width: 38, height: 38, borderRadius: 12, 
+    backgroundColor: '#1e293b', 
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: '#334155'
+  },
+  list: { padding: GAP / 2 },
+  item: { 
+    width: ITEM_SIZE, height: ITEM_SIZE, 
+    margin: GAP / 2, 
+    borderRadius: 8, 
+    overflow: 'hidden', 
+    backgroundColor: '#1e293b' 
+  },
   folderContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  folderName: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginTop: 4 },
-  photoContent: { flex: 1 },
+  folderIcon: { 
+    width: 52, height: 52, borderRadius: 16, 
+    backgroundColor: 'rgba(59,130,246,0.1)', 
+    justifyContent: 'center', alignItems: 'center' 
+  },
+  folderName: { color: '#94a3b8', fontSize: 11, fontWeight: '700', marginTop: 6 },
+  photoContent: { flex: 1, position: 'relative' },
   image: { width: '100%', height: '100%' },
-  badge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(37, 99, 235, 0.9)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  imageOverlay: { 
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: 30, 
+    backgroundColor: 'transparent'
+  },
+  badge: { 
+    position: 'absolute', bottom: 6, right: 6, 
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4 
+  },
+  badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#64748b', marginTop: 15, fontWeight: '500' },
-  empty: { marginTop: 100, alignItems: 'center' },
-  emptyText: { color: '#475569', marginTop: 20, fontSize: 16 },
-  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' },
-  closeBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.1)', padding: 10, borderRadius: 25 },
-  fullImage: { width: '100%', height: '70%' },
-  viewerFooter: { position: 'absolute', bottom: 50, width: '100%', alignItems: 'center', padding: 20 },
-  fileName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  fileMeta: { color: '#64748b', fontSize: 14, marginTop: 5 }
+  loadingBox: { alignItems: 'center' },
+  loadingText: { color: '#475569', marginTop: 16, fontWeight: '600', fontSize: 14 },
+  empty: { marginTop: 80, alignItems: 'center', paddingHorizontal: 40 },
+  emptyIcon: { 
+    width: 80, height: 80, borderRadius: 24, 
+    backgroundColor: '#1e293b', 
+    justifyContent: 'center', alignItems: 'center', 
+    marginBottom: 20 
+  },
+  emptyTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 8 },
+  emptyText: { color: '#475569', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  // Full-screen viewer
+  viewer: { flex: 1, backgroundColor: '#000' },
+  viewerHeader: { 
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 56 : 20, paddingHorizontal: 16, paddingBottom: 12
+  },
+  closeBtn: { 
+    width: 40, height: 40, borderRadius: 20, 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    justifyContent: 'center', alignItems: 'center',
+    backdropFilter: 'blur(10px)' as any
+  },
+  viewerActions: { flexDirection: 'row', gap: 8 },
+  viewerAction: { 
+    width: 40, height: 40, borderRadius: 20, 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    justifyContent: 'center', alignItems: 'center' 
+  },
+  fullImage: { width: '100%', height: '100%' },
+  viewerFooter: { 
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 40 : 20, paddingTop: 16,
+    backgroundColor: 'rgba(0,0,0,0.6)'
+  },
+  footerInfo: {},
+  fileName: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  metaRow: { flexDirection: 'row', marginTop: 8, gap: 10 },
+  metaBadge: { 
+    flexDirection: 'row', alignItems: 'center', 
+    backgroundColor: 'rgba(255,255,255,0.08)', 
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 
+  },
+  metaText: { color: '#94a3b8', fontSize: 11, marginLeft: 4, fontWeight: '600' },
 });
