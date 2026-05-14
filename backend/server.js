@@ -138,14 +138,33 @@ app.get('/api/gallery', authenticateToken, async (req, res) => {
 
 app.get('/api/cloud/photos', authenticateToken, async (req, res) => {
   try {
-    const token = await getVercelToken(req.user.tenantId);
-    if (!token) return res.json([]);
-    const response = await fetch(`https://blob.vercel-storage.com?v=1`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const data = await response.json();
-    res.json(data.blobs || []);
+    const tenantId = req.user.tenantId;
+    if (!tenantId) return res.json([]);
+    
+    // Fetch all files for this tenant from the DB (Unified View)
+    const files = await sql`
+      SELECT f.*, c.provider
+      FROM files f
+      LEFT JOIN storage_connections c ON f.connection_id = c.id
+      WHERE f.tenant_id = ${tenantId}
+      ORDER BY f.uploaded_at DESC
+    `;
+
+    // Map to the format the mobile app expects
+    const formatted = files.map(f => ({
+      id: f.id,
+      url: f.storage_url,
+      name: f.name,
+      path: f.storage_key || '',
+      provider: f.provider || 'vercel-blob',
+      size: f.size_bytes,
+      date: f.uploaded_at,
+      type: f.content_type?.startsWith('video') ? 'video' : 'image'
+    }));
+
+    res.json(formatted);
   } catch (err) {
+    console.error('Unified Gallery Error:', err);
     res.json([]);
   }
 });
