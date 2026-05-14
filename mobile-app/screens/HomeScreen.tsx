@@ -267,6 +267,25 @@ export default function HomeScreen() {
     );
   };
 
+  const handleNextPhoto = () => {
+    if (!selectedPhoto) return;
+    const currentIndex = visibleFiles.findIndex((f: any) => f.id === selectedPhoto.id);
+    if (currentIndex >= 0 && currentIndex < visibleFiles.length - 1) {
+      setSelectedPhoto(visibleFiles[currentIndex + 1]);
+    }
+  };
+
+  const handlePrevPhoto = () => {
+    if (!selectedPhoto) return;
+    const currentIndex = visibleFiles.findIndex((f: any) => f.id === selectedPhoto.id);
+    if (currentIndex > 0) {
+      setSelectedPhoto(visibleFiles[currentIndex - 1]);
+    }
+  };
+
+  const isFirstPhoto = selectedPhoto ? visibleFiles.findIndex((f: any) => f.id === selectedPhoto.id) === 0 : true;
+  const isLastPhoto = selectedPhoto ? visibleFiles.findIndex((f: any) => f.id === selectedPhoto.id) === visibleFiles.length - 1 : true;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
@@ -401,7 +420,23 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <Image source={{ uri: selectedPhoto?.url }} style={styles.fullImage} resizeMode="contain" />
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            {/* Previous Button */}
+            {!isFirstPhoto && (
+              <TouchableOpacity style={styles.navBtnLeft} onPress={handlePrevPhoto}>
+                <Ionicons name="chevron-back" size={32} color="#fff" />
+              </TouchableOpacity>
+            )}
+
+            <Image source={{ uri: selectedPhoto?.url }} style={styles.fullImage} resizeMode="contain" />
+
+            {/* Next Button */}
+            {!isLastPhoto && (
+              <TouchableOpacity style={styles.navBtnRight} onPress={handleNextPhoto}>
+                <Ionicons name="chevron-forward" size={32} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
 
           <View style={styles.viewerFooter}>
             <View style={styles.footerInfo}>
@@ -416,7 +451,7 @@ export default function HomeScreen() {
                 {selectedPhoto?.size && (
                   <View style={styles.metaBadge}>
                     <Ionicons name="document" size={10} color="#64748b" />
-                    <Text style={styles.metaText}>{(selectedPhoto?.size / 1024).toFixed(1)} KB</Text>
+                    <Text style={styles.metaText}>{(selectedPhoto?.size / 1024 / 1024).toFixed(2)} MB</Text>
                   </View>
                 )}
               </View>
@@ -620,7 +655,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)', 
     justifyContent: 'center', alignItems: 'center' 
   },
-  fullImage: { width: '100%', height: '100%' },
+  navBtnLeft: {
+    position: 'absolute', left: 16, zIndex: 20,
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  navBtnRight: {
+    position: 'absolute', right: 16, zIndex: 20,
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  fullImage: { flex: 1, width: '100%', height: '100%' },
   viewerFooter: { 
     position: 'absolute', bottom: 0, left: 0, right: 0,
     paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 40 : 20, paddingTop: 16,
