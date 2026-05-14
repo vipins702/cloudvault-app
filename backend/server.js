@@ -237,17 +237,14 @@ app.get('/auth/google/callback', async (req, res) => {
     const tokens = await response.json();
 
     if (!tokens.access_token) {
-      return res.status(400).send(`
-        <html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
-          <div style="text-align:center"><h1>❌ Connection Failed</h1><p style="color:#94a3b8">Google OAuth error: ${JSON.stringify(tokens)}</p></div>
-        </body></html>`);
+      return res.status(400).send('<html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h1>Connection Failed</h1><p style="color:#94a3b8">Google OAuth error: ' + JSON.stringify(tokens) + '</p></div></body></html>');
     }
 
     // 2. Decode the state to get the user's JWT
-    let userPayload = null;
+    var userPayload = null;
     if (state) {
       try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
+        var stateData = JSON.parse(Buffer.from(state, 'base64').toString());
         if (stateData.jwt) {
           userPayload = jwt.verify(stateData.jwt, JWT_SECRET);
         }
@@ -257,23 +254,23 @@ app.get('/auth/google/callback', async (req, res) => {
     }
 
     // 3. Save the connection to DB if we have a valid user
-    let savedToDB = false;
+    var savedToDB = false;
     if (userPayload && userPayload.tenantId) {
       try {
-        const encryptedAccessToken = SaaSVault.encrypt(tokens.access_token);
-        const encryptedRefreshToken = tokens.refresh_token ? SaaSVault.encrypt(tokens.refresh_token) : null;
-        const creds = JSON.stringify({ 
+        var encryptedAccessToken = SaaSVault.encrypt(tokens.access_token);
+        var encryptedRefreshToken = tokens.refresh_token ? SaaSVault.encrypt(tokens.refresh_token) : null;
+        var creds = JSON.stringify({ 
           token: encryptedAccessToken,
           refresh_token: encryptedRefreshToken,
           expires_at: Date.now() + (tokens.expires_in * 1000)
         });
 
         // Upsert: delete old connection, insert fresh one
-        await sql\`DELETE FROM storage_connections WHERE tenant_id = \${userPayload.tenantId} AND provider = 'google-photos'\`;
-        await sql\`
+        await sql`DELETE FROM storage_connections WHERE tenant_id = ${userPayload.tenantId} AND provider = 'google-photos'`;
+        await sql`
           INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, updated_at)
-          VALUES (\${crypto.randomUUID()}, \${userPayload.tenantId}, 'google-photos', 'Google Photos', \${creds}, true, \${new Date().toISOString()})
-        \`;
+          VALUES (${crypto.randomUUID()}, ${userPayload.tenantId}, 'google-photos', 'Google Photos', ${creds}, true, ${new Date().toISOString()})
+        `;
         savedToDB = true;
       } catch (dbErr) {
         console.error('DB save error:', dbErr.message);
@@ -281,42 +278,40 @@ app.get('/auth/google/callback', async (req, res) => {
     }
 
     // 4. Return a premium success page
-    res.send(\`<!DOCTYPE html>
-      <html><head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CloudVault - Connected!</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-          .card { text-align: center; padding: 50px; max-width: 420px; }
-          .icon { font-size: 64px; margin-bottom: 20px; animation: pulse 2s infinite; }
-          @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
-          h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; background: linear-gradient(135deg, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-          p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 20px; }
-          .badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 10px 24px; border-radius: 30px; font-weight: 700; font-size: 14px; letter-spacing: 1px; border: 1px solid rgba(16,185,129,0.3); }
-          .db-status { margin-top: 20px; padding: 12px 20px; border-radius: 12px; font-size: 13px; }
-          .db-ok { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
-          .db-warn { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
-          .info { color: #475569; font-size: 13px; margin-top: 30px; }
-        </style>
-      </head><body>
-        <div class="card">
-          <div class="icon">🔗</div>
-          <h1>Google Photos Connected!</h1>
-          <p>Your Google Photos library has been securely linked to CloudVault with AES-256 encryption.</p>
-          <div class="badge">✓ INTEGRATION COMPLETE</div>
-          <div class="db-status \${savedToDB ? 'db-ok' : 'db-warn'}">
-            \${savedToDB ? '🔒 Credentials encrypted & saved to your vault' : '⚠️ Connected but not saved — please log in first, then reconnect'}
-          </div>
-          <p class="info">You can now close this window and return to the CloudVault app.</p>
-        </div>
-      </body></html>\`);
+    var dbClass = savedToDB ? 'db-ok' : 'db-warn';
+    var dbMsg = savedToDB 
+      ? 'Credentials encrypted and saved to your vault' 
+      : 'Connected but not saved. Please log in first, then reconnect.';
+
+    res.send([
+      '<!DOCTYPE html><html><head>',
+      '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">',
+      '<title>CloudVault - Connected!</title>',
+      '<style>',
+      '* { margin: 0; padding: 0; box-sizing: border-box; }',
+      'body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; }',
+      '.card { text-align: center; padding: 50px; max-width: 420px; }',
+      '.icon { font-size: 64px; margin-bottom: 20px; animation: pulse 2s infinite; }',
+      '@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }',
+      'h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; background: linear-gradient(135deg, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }',
+      'p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 20px; }',
+      '.badge { display: inline-block; background: rgba(16,185,129,0.15); color: #10b981; padding: 10px 24px; border-radius: 30px; font-weight: 700; font-size: 14px; letter-spacing: 1px; border: 1px solid rgba(16,185,129,0.3); }',
+      '.db-status { margin-top: 20px; padding: 12px 20px; border-radius: 12px; font-size: 13px; }',
+      '.db-ok { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }',
+      '.db-warn { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }',
+      '.info { color: #475569; font-size: 13px; margin-top: 30px; }',
+      '</style></head><body>',
+      '<div class="card">',
+      '<div class="icon">🔗</div>',
+      '<h1>Google Photos Connected!</h1>',
+      '<p>Your Google Photos library has been securely linked to CloudVault with AES-256 encryption.</p>',
+      '<div class="badge">✓ INTEGRATION COMPLETE</div>',
+      '<div class="db-status ' + dbClass + '">' + dbMsg + '</div>',
+      '<p class="info">You can now close this window and return to the CloudVault app.</p>',
+      '</div></body></html>'
+    ].join('\n'));
   } catch (err) {
-    res.status(500).send(\`
-      <html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
-        <div style="text-align:center"><h1>❌ Connection Failed</h1><p style="color:#ef4444">\${err.message}</p></div>
-      </body></html>\`);
+    res.status(500).send('<html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h1>Connection Failed</h1><p style="color:#ef4444">' + err.message + '</p></div></body></html>');
   }
 });
 
