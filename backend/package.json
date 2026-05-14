@@ -11,7 +11,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.987.0",
     "@neondatabase/serverless": "^1.0.2",
-    "@rollup/rollup-win32-x64-msvc": "^4.57.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/exif-js": "^2.3.1",
     "@types/jszip": "^3.4.0",
@@ -27,7 +26,6 @@
     "idb": "^8.0.3",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
-    "lightningcss-win32-x64-msvc": "^1.31.1",
     "lucide-react": "^0.563.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
