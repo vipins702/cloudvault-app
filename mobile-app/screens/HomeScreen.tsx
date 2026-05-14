@@ -10,11 +10,14 @@ import {
   ActivityIndicator,
   StatusBar,
   Modal,
-  Platform
+  Platform,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DbService } from '../utils/db';
+import { Storage } from '../utils/storage';
+import { BACKEND_URL } from '../utils/constants';
 
 const { width, height } = Dimensions.get('window');
 const COLUMN_COUNT = 3;
@@ -28,12 +31,19 @@ export default function HomeScreen() {
   const [currentPath, setCurrentPath] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // Bulk Selection State
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+
   useEffect(() => {
     loadGallery();
   }, []);
 
   const loadGallery = async () => {
     setLoading(true);
+    setSelectionMode(false);
+    setSelectedFileIds(new Set());
     try {
       const data = await DbService.fetchUnifiedGallery();
       setPhotos(data);
@@ -42,6 +52,41 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleSelection = (id: string) => {
+    const next = new Set(selectedFileIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedFileIds(next);
+    if (next.size === 0) setSelectionMode(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedFileIds.size === 0) return;
+    Alert.alert('Delete Assets', `Are you sure you want to delete ${selectedFileIds.size} files across your clouds? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+          setIsDeleting(true);
+          try {
+            const token = await Storage.getItem('authToken');
+            const res = await fetch(`${BACKEND_URL}/api/files/delete`, {
+              method: 'POST',
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ fileIds: Array.from(selectedFileIds) })
+            });
+            if (!res.ok) throw new Error('Deletion failed');
+            await loadGallery(); // refresh
+          } catch (e: any) {
+            Alert.alert('Error', e.message);
+          } finally {
+            setIsDeleting(false);
+          }
+      }}
+    ]);
   };
 
   const { visibleFiles, visibleFolders } = useMemo(() => {
@@ -78,11 +123,27 @@ export default function HomeScreen() {
 
   const renderItem = ({ item }: { item: any }) => {
     const isFolder = typeof item === 'string';
+    const isSelected = !isFolder && selectedFileIds.has(item.id);
+
     return (
       <TouchableOpacity 
-        style={styles.item}
+        style={[styles.item, isSelected && styles.itemSelected]}
         activeOpacity={0.85}
-        onPress={() => isFolder ? setCurrentPath(currentPath ? `${currentPath}/${item}` : item) : setSelectedPhoto(item)}
+        onLongPress={() => {
+          if (!isFolder) {
+            setSelectionMode(true);
+            toggleSelection(item.id);
+          }
+        }}
+        onPress={() => {
+          if (selectionMode && !isFolder) {
+            toggleSelection(item.id);
+          } else if (isFolder) {
+            setCurrentPath(currentPath ? `${currentPath}/${item}` : item);
+          } else {
+            setSelectedPhoto(item);
+          }
+        }}
       >
         {isFolder ? (
           <View style={styles.folderContent}>
@@ -93,11 +154,20 @@ export default function HomeScreen() {
           </View>
         ) : (
           <View style={styles.photoContent}>
-            <Image source={{ uri: item.url }} style={styles.image} />
+            <Image source={{ uri: item.url }} style={[styles.image, isSelected && { opacity: 0.6 }]} />
             <View style={styles.imageOverlay} />
             {item.provider && (
               <View style={[styles.badge, { backgroundColor: getProviderBadge(item.provider).color }]}>
                 <Text style={styles.badgeText}>{getProviderBadge(item.provider).letter}</Text>
+              </View>
+            )}
+            {selectionMode && (
+              <View style={styles.checkboxOverlay}>
+                <Ionicons 
+                  name={isSelected ? "checkmark-circle" : "ellipse-outline"} 
+                  size={24} 
+                  color={isSelected ? "#3b82f6" : "rgba(255,255,255,0.5)"} 
+                />
               </View>
             )}
           </View>
@@ -111,36 +181,58 @@ export default function HomeScreen() {
       <StatusBar barStyle="light-content" />
       
       {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          {currentPath ? (
-            <TouchableOpacity onPress={() => setCurrentPath('')} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={20} color="#3b82f6" />
-            </TouchableOpacity>
-          ) : null}
-          <View>
-            <Text style={styles.headerTitle}>
-              {currentPath ? currentPath.split('/').pop() : 'Gallery'}
-            </Text>
-            <Text style={styles.subtitle}>
-              {currentPath 
-                ? `${visibleFiles.length} files • ${visibleFolders.length} folders`
-                : `${photos.length} assets across all clouds`
-              }
-            </Text>
-          </View>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity 
-            style={styles.actionBtn} 
-            onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-          >
-            <Ionicons name={viewMode === 'grid' ? 'grid' : 'list'} size={18} color="#94a3b8" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={loadGallery} style={styles.actionBtn}>
-            <Ionicons name="refresh" size={18} color="#94a3b8" />
-          </TouchableOpacity>
-        </View>
+      <View style={[styles.header, selectionMode && styles.headerSelectionMode]}>
+        {selectionMode ? (
+          <>
+            <View style={styles.headerLeft}>
+              <TouchableOpacity onPress={() => { setSelectionMode(false); setSelectedFileIds(new Set()); }} style={styles.backBtn}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>{selectedFileIds.size} Selected</Text>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleBulkDelete} disabled={isDeleting} style={styles.actionBtn}>
+                {isDeleting ? (
+                  <ActivityIndicator color="#ef4444" size="small" />
+                ) : (
+                  <Ionicons name="trash" size={22} color="#ef4444" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.headerLeft}>
+              {currentPath ? (
+                <TouchableOpacity onPress={() => setCurrentPath('')} style={styles.backBtn}>
+                  <Ionicons name="chevron-back" size={20} color="#3b82f6" />
+                </TouchableOpacity>
+              ) : null}
+              <View>
+                <Text style={styles.headerTitle}>
+                  {currentPath ? currentPath.split('/').pop() : 'Gallery'}
+                </Text>
+                <Text style={styles.subtitle}>
+                  {currentPath 
+                    ? `${visibleFiles.length} files • ${visibleFolders.length} folders`
+                    : `${photos.length} assets across all clouds`
+                  }
+                </Text>
+              </View>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity 
+                style={styles.actionBtn} 
+                onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+              >
+                <Ionicons name={viewMode === 'grid' ? 'grid' : 'list'} size={18} color="#94a3b8" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={loadGallery} style={styles.actionBtn}>
+                <Ionicons name="refresh" size={18} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
 
       {loading ? (
@@ -225,6 +317,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b'
   },
+  headerSelectionMode: {
+    backgroundColor: '#3b82f6',
+    borderBottomColor: '#2563eb'
+  },
   headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   backBtn: { 
     width: 36, height: 36, borderRadius: 12, 
@@ -247,7 +343,13 @@ const styles = StyleSheet.create({
     margin: GAP / 2, 
     borderRadius: 8, 
     overflow: 'hidden', 
-    backgroundColor: '#1e293b' 
+    backgroundColor: '#1e293b',
+    borderWidth: 2,
+    borderColor: 'transparent'
+  },
+  itemSelected: {
+    borderColor: '#3b82f6',
+    transform: [{ scale: 0.95 }]
   },
   folderContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   folderIcon: { 
@@ -261,6 +363,11 @@ const styles = StyleSheet.create({
   imageOverlay: { 
     position: 'absolute', bottom: 0, left: 0, right: 0, height: 30, 
     backgroundColor: 'transparent'
+  },
+  checkboxOverlay: {
+    position: 'absolute', top: 6, left: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.3)'
   },
   badge: { 
     position: 'absolute', bottom: 6, right: 6, 

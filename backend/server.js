@@ -265,7 +265,64 @@ app.delete('/api/connections/:provider', authenticateToken, async (req, res) => 
   }
 });
 
-// ========== TRANSFER ROUTES (SaaS Master Engine) ==========
+// ========== TRANSFER & BULK ROUTES (SaaS Master Engine) ==========
+
+app.post('/api/files/delete', authenticateToken, async (req, res) => {
+  const { fileIds } = req.body;
+  const tenantId = req.user.tenantId;
+
+  try {
+    let deletedCount = 0;
+    
+    for (const id of fileIds) {
+      // 1. Fetch file to get url and connection
+      const fileRecords = await sql`SELECT * FROM files WHERE id = ${id} AND tenant_id = ${tenantId}`;
+      const file = fileRecords[0];
+      if (!file) continue;
+
+      // 2. Fetch connection to get credentials
+      const targetConns = await sql`SELECT * FROM storage_connections WHERE id = ${file.connection_id} AND tenant_id = ${tenantId}`;
+      const targetConn = targetConns[0];
+
+      // 3. Delete from Provider
+      if (targetConn && targetConn.provider === 'vercel-blob') {
+        try {
+          const creds = JSON.parse(targetConn.credentials_encrypted);
+          const rawToken = creds.token || '';
+          const match = rawToken.match(/(vercel_blob_[a-zA-Z0-9_]+)/);
+          const token = match ? match[1] : rawToken.trim();
+
+          console.log(`[DeleteEngine] Deleting from Vercel: ${file.storage_url}`);
+          await fetch('https://blob.vercel-storage.com/delete', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ urls: [file.storage_url] })
+          });
+        } catch (e) {
+          console.error(`[DeleteEngine] Failed to delete remote file ${file.storage_url}:`, e.message);
+        }
+      }
+
+      // 4. Delete from DB
+      await sql`DELETE FROM files WHERE id = ${id} AND tenant_id = ${tenantId}`;
+      deletedCount++;
+    }
+
+    // Audit log
+    await sql`
+      INSERT INTO audit_logs (id, tenant_id, user_id, action, target, metadata, created_at)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'DELETE_FILES', 'storage', ${JSON.stringify({ count: deletedCount })}, ${new Date().toISOString()})
+    `;
+
+    res.json({ success: true, deleted: deletedCount });
+  } catch (err) {
+    console.error('[DeleteEngine] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/api/files/transfer', authenticateToken, async (req, res) => {
   const { fileId, targetProviderId, newFolder } = req.body;
