@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "CloudVault",
+    "slug": "cloudvault-mobile",
+    "version": "1.0.0",
+    "platforms": ["ios", "android", "web"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTabletMode": true,
+      "bundleIdentifier": "com.cloudvault.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "CloudVault needs access to your photos to transfer them",
+        "NSPhotoLibraryAddUsageDescription": "CloudVault needs permission to save transferred photos",
+        "NSCameraUsageDescription": "Allow CloudVault to access your camera"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "cloudvault",
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow CloudVault to access your photos.",
+          "savePhotosPermission": "Allow CloudVault to save photos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ]
+  }
+}
