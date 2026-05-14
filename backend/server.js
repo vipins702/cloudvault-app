@@ -212,6 +212,80 @@ app.delete('/api/connections/:provider', authenticateToken, async (req, res) => 
   }
 });
 
+// ========== TRANSFER ROUTES (SaaS Master Engine) ==========
+
+app.post('/api/files/transfer', authenticateToken, async (req, res) => {
+  const { fileId, targetProviderId, newFolder } = req.body;
+  const tenantId = req.user.tenantId;
+
+  try {
+    // 1. Fetch file metadata
+    const fileRecords = await sql`SELECT * FROM files WHERE id = ${fileId} AND tenant_id = ${tenantId}`;
+    const file = fileRecords[0];
+    if (!file) throw new Error('File not found in database');
+
+    // 2. Fetch target provider credentials
+    const targetConns = await sql`SELECT * FROM storage_connections WHERE provider = ${targetProviderId} AND tenant_id = ${tenantId}`;
+    const targetConn = targetConns[0];
+    if (!targetConn) throw new Error('Target provider not connected');
+
+    let newUrl = '';
+    let newKey = '';
+
+    // 3. Download from Source (Cloud to Cloud streaming)
+    console.log(`[TransferEngine] Downloading ${file.name} from ${file.storage_url}...`);
+    const sourceResponse = await fetch(file.storage_url);
+    if (!sourceResponse.ok) throw new Error('Failed to fetch from source provider');
+
+    // 4. Upload to Target Provider
+    if (targetProviderId === 'vercel-blob') {
+      let creds;
+      try {
+        creds = JSON.parse(targetConn.credentials_encrypted);
+      } catch (e) {
+        throw new Error('Invalid target credentials');
+      }
+      
+      const rawToken = creds.token || '';
+      const match = rawToken.match(/(vercel_blob_[a-zA-Z0-9_]+)/);
+      const token = match ? match[1] : rawToken.trim();
+
+      const pathname = newFolder ? `${newFolder}/${file.name}` : file.name;
+      
+      console.log(`[TransferEngine] Uploading to Vercel Blob as ${pathname}...`);
+      const uploadResponse = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(pathname)}?v=1`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': file.content_type || 'application/octet-stream',
+        },
+        body: sourceResponse.body,
+        duplex: 'half'
+      });
+
+      if (!uploadResponse.ok) throw new Error('Failed to upload to target provider');
+      const uploadData = await uploadResponse.json();
+      newUrl = uploadData.url;
+      newKey = uploadData.pathname;
+    } else {
+      throw new Error(`Transfer to ${targetProviderId} not yet implemented on master backend`);
+    }
+
+    // 5. Update Database Record
+    const now = new Date().toISOString();
+    await sql`
+      UPDATE files 
+      SET storage_url = ${newUrl}, storage_key = ${newKey}, connection_id = ${targetConn.id}, folder = ${newFolder || file.folder}, uploaded_at = ${now}
+      WHERE id = ${fileId} AND tenant_id = ${tenantId}
+    `;
+
+    res.json({ success: true, url: newUrl });
+  } catch (err) {
+    console.error('[TransferEngine] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ========== AI ROUTES ==========
 
 app.get('/api/ai/duplicates', authenticateToken, async (req, res) => {
