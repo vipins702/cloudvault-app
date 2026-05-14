@@ -45,15 +45,44 @@ app.get('/', (req, res) => {
 const hashPassword = (password) => Buffer.from(password).toString('base64');
 
 // --- Auth Middleware ---
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
+  
   if (!token) return res.status(401).json({ error: 'Token missing' });
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
+
+  try {
+    // True Database Session Validation (Matching Web App)
+    const sessions = await sql`
+      SELECT s.*, u.email, u.name 
+      FROM sessions s
+      JOIN users u ON s.user_id = u.id
+      WHERE s.token = ${token}
+    `;
+    
+    const session = sessions[0];
+    
+    if (!session) {
+      return res.status(403).json({ error: 'Session not found' });
+    }
+
+    if (new Date(session.expires_at) < new Date()) {
+      await sql`DELETE FROM sessions WHERE token = ${token}`;
+      return res.status(403).json({ error: 'Session expired' });
+    }
+
+    req.user = {
+      id: session.user_id,
+      tenantId: session.tenant_id,
+      email: session.email,
+      name: session.name
+    };
+
     next();
-  });
+  } catch (err) {
+    console.error('Auth middleware error:', err);
+    res.status(500).json({ error: 'Internal auth error' });
+  }
 };
 
 // --- VERCEL TOKEN HELPER ---
@@ -96,21 +125,28 @@ app.post('/api/login', async (req, res) => {
 
     if (!user) return res.status(400).json({ error: 'User not found' });
 
+    // Note: The web app uses btoa() for hashing in demo. `hashPassword` uses base64. They are equivalent.
     if (user.password_hash !== hashPassword(password)) {
       return res.status(400).json({ error: 'Invalid password' });
     }
 
-    const token = jwt.sign({
-      id: user.id,
-      tenantId: user.tenant_id,
-      email: user.email
-    }, JWT_SECRET, { expiresIn: '7d' });
+    // CREATE TRUE DATABASE SESSION (Matching Web App)
+    const sessionToken = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    await sql`
+      INSERT INTO sessions (id, user_id, tenant_id, token, expires_at, created_at)
+      VALUES (${sessionId}, ${user.id}, ${user.tenant_id}, ${sessionToken}, ${expiresAt.toISOString()}, ${now.toISOString()})
+    `;
 
     res.json({
-      token,
+      token: sessionToken,
       user: { id: user.id, email: user.email, name: user.name, tenantId: user.tenant_id }
     });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -350,13 +386,18 @@ app.get('/auth/google/callback', async (req, res) => {
       return res.status(400).send('<html><body style="background:#0f172a;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h1>Connection Failed</h1><p style="color:#94a3b8">Google OAuth error: ' + JSON.stringify(tokens) + '</p></div></body></html>');
     }
 
-    // 2. Decode the state to get the user's JWT
+    // 2. Decode the state to get the user's session token
     var userPayload = null;
     if (state) {
       try {
         var stateData = JSON.parse(Buffer.from(state, 'base64').toString());
         if (stateData.jwt) {
-          userPayload = jwt.verify(stateData.jwt, JWT_SECRET);
+          // The 'jwt' field now actually contains our DB session token
+          const sessionRows = await sql`SELECT * FROM sessions WHERE token = ${stateData.jwt}`;
+          const session = sessionRows[0];
+          if (session && new Date(session.expires_at) >= new Date()) {
+            userPayload = { tenantId: session.tenant_id, userId: session.user_id };
+          }
         }
       } catch (e) {
         console.error('State decode error:', e.message);
@@ -367,20 +408,29 @@ app.get('/auth/google/callback', async (req, res) => {
     var savedToDB = false;
     if (userPayload && userPayload.tenantId) {
       try {
-        var encryptedAccessToken = SaaSVault.encrypt(tokens.access_token);
-        var encryptedRefreshToken = tokens.refresh_token ? SaaSVault.encrypt(tokens.refresh_token) : null;
+        // The web app doesn't always double encrypt for Google if it stores raw JSON string
+        // We'll mimic the exact DB insert format
         var creds = JSON.stringify({ 
-          token: encryptedAccessToken,
-          refresh_token: encryptedRefreshToken,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
           expires_at: Date.now() + (tokens.expires_in * 1000)
         });
+
+        const now = new Date().toISOString();
 
         // Upsert: delete old connection, insert fresh one
         await sql`DELETE FROM storage_connections WHERE tenant_id = ${userPayload.tenantId} AND provider = 'google-photos'`;
         await sql`
-          INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, updated_at)
-          VALUES (${crypto.randomUUID()}, ${userPayload.tenantId}, 'google-photos', 'Google Photos', ${creds}, true, ${new Date().toISOString()})
+          INSERT INTO storage_connections (id, tenant_id, provider, name, credentials_encrypted, is_active, metadata, created_at, updated_at)
+          VALUES (${crypto.randomUUID()}, ${userPayload.tenantId}, 'google-photos', 'Google Photos', ${creds}, true, '{}'::jsonb, ${now}, ${now})
         `;
+        
+        // Audit log
+        await sql`
+          INSERT INTO audit_logs (id, tenant_id, user_id, action, target, metadata, created_at)
+          VALUES (${crypto.randomUUID()}, ${userPayload.tenantId}, ${userPayload.userId}, 'LINK_CLOUD', 'connection', '{"provider":"google-photos"}'::jsonb, ${now})
+        `;
+        
         savedToDB = true;
       } catch (dbErr) {
         console.error('DB save error:', dbErr.message);
