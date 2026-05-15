@@ -96,21 +96,32 @@ export default function HomeScreen() {
   };
 
   const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
-      allowsEditing: true,
-      quality: 0.8,
-    });
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need access to your gallery to upload photos.');
+        return;
+      }
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const asset = result.assets[0];
-      setSelectedFile({
-        uri: asset.uri,
-        name: asset.fileName || `image_${Date.now()}.${asset.mimeType?.split('/')[1] || 'jpg'}`,
-        mimeType: asset.mimeType || 'image/jpeg',
-        isImage: true
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
       });
-      setUploadModalVisible(true);
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setSelectedFile({
+          uri: asset.uri,
+          name: asset.fileName || `image_${Date.now()}.${asset.mimeType?.split('/')[1] || 'jpg'}`,
+          mimeType: asset.mimeType || 'image/jpeg',
+          isImage: true
+        });
+        setUploadModalVisible(true);
+      }
+    } catch (e: any) {
+      console.error('ImagePicker Error:', e);
+      Alert.alert('Error', 'Could not open image library: ' + e.message);
     }
   };
 
