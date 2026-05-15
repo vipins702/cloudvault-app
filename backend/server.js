@@ -341,6 +341,57 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
       const uploadData = await uploadResponse.json();
       newUrl = uploadData.url;
       newKey = uploadData.pathname;
+    } else if (targetProviderId === 'google-photos') {
+      let creds;
+      try {
+        creds = JSON.parse(targetConn.credentials_encrypted);
+      } catch (e) {
+        throw new Error('Failed to parse Google credentials');
+      }
+      
+      const decryptedToken = creds.access_token || creds.token;
+      if (!decryptedToken) throw new Error('No access token for Google Photos');
+
+      console.log(`[UploadEngine] Uploading bytes to Google Photos API...`);
+      const uploadBytesRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${decryptedToken}`,
+          'Content-Type': 'application/octet-stream',
+          'X-Goog-Upload-Content-Type': contentType || 'image/jpeg',
+          'X-Goog-Upload-Protocol': 'raw'
+        },
+        body: buffer
+      });
+      
+      if (!uploadBytesRes.ok) throw new Error('Google Photos raw upload failed');
+      const uploadToken = await uploadBytesRes.text();
+
+      console.log(`[UploadEngine] Creating Media Item in Google Photos...`);
+      const createItemRes = await fetch('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${decryptedToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          newMediaItems: [{
+            description: fileName,
+            simpleMediaItem: { uploadToken }
+          }]
+        })
+      });
+
+      if (!createItemRes.ok) throw new Error('Google Photos media item creation failed');
+      const createData = await createItemRes.json();
+      
+      if (!createData.newMediaItemResults || !createData.newMediaItemResults[0].mediaItem) {
+        throw new Error('Google Photos returned empty results');
+      }
+      
+      const mediaItem = createData.newMediaItemResults[0].mediaItem;
+      newUrl = mediaItem.baseUrl;
+      newKey = mediaItem.id;
     } else {
       throw new Error(`Upload to ${targetProviderId} not yet implemented on master backend`);
     }
@@ -432,9 +483,48 @@ app.post('/api/files/delete', authenticateToken, async (req, res) => {
       VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'DELETE_FILES', 'storage', ${JSON.stringify({ count: deletedCount })}, ${new Date().toISOString()})
     `;
 
-    res.json({ success: true, deleted: deletedCount });
+    res.json({ success: true, deletedCount });
   } catch (err) {
     console.error('[DeleteEngine] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/folders/create', authenticateToken, async (req, res) => {
+  const { name, provider } = req.body;
+  const tenantId = req.user.tenantId;
+
+  try {
+    const targetConns = await sql`SELECT * FROM storage_connections WHERE provider = ${provider} AND tenant_id = ${tenantId}`;
+    const targetConn = targetConns[0];
+    if (!targetConn) throw new Error('Provider not connected');
+
+    if (provider === 'google-photos') {
+      const creds = JSON.parse(targetConn.credentials_encrypted);
+      const token = creds.access_token || creds.token;
+
+      console.log(`[FolderEngine] Creating Album "${name}" on Google Photos...`);
+      const response = await fetch('https://photoslibrary.googleapis.com/v1/albums', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ album: { title: name } })
+      });
+
+      if (!response.ok) throw new Error('Failed to create album on Google Photos');
+    }
+    
+    // Even if it's virtual (like Vercel), we log it
+    await sql`
+      INSERT INTO audit_logs (id, tenant_id, user_id, action, target, metadata, created_at)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'CREATE_FOLDER', 'storage', ${JSON.stringify({ name, provider })}, ${new Date().toISOString()})
+    `;
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[FolderEngine] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });

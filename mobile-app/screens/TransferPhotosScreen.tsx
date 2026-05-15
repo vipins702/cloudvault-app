@@ -140,7 +140,7 @@ export default function TransferPhotosScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <View style={styles.content}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>Cloud Tunnel</Text>
           <Text style={styles.subtitle}>Direct Server-to-Server Migration</Text>
@@ -298,7 +298,7 @@ export default function TransferPhotosScreen() {
             </TouchableOpacity>
           </>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

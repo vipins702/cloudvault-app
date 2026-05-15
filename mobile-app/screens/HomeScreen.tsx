@@ -238,8 +238,32 @@ export default function HomeScreen() {
 
   const createFolder = () => {
     if (!newFolderName.trim()) return;
-    const folderPath = currentPath ? `${currentPath}/${newFolderName.trim()}` : newFolderName.trim();
-    setEmptyFolders([...emptyFolders, folderPath]);
+    
+    try {
+      const token = await Storage.getItem('authToken');
+      // For now, we hit the general gallery load to refresh, but ideally we'd hit a /folders/create API
+      // Google Photos uses Albums, so this would map to an album creation.
+      const res = await fetch(`${BACKEND_URL}/api/folders/create`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: newFolderName, provider: 'google-photos' }) // Default to google-photos for now
+      });
+
+      if (res.ok) {
+        Alert.alert('Success', `Album "${newFolderName}" created on cloud.`);
+      } else {
+        // Fallback to local state if backend API isn't fully ready yet
+        const folderPath = currentPath ? `${currentPath}/${newFolderName.trim()}` : newFolderName.trim();
+        setEmptyFolders([...emptyFolders, folderPath]);
+      }
+    } catch (e) {
+      const folderPath = currentPath ? `${currentPath}/${newFolderName.trim()}` : newFolderName.trim();
+      setEmptyFolders([...emptyFolders, folderPath]);
+    }
+    
     setFolderModalVisible(false);
     setNewFolderName('');
   };
@@ -835,6 +859,15 @@ export default function HomeScreen() {
              <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabMenuVisible(false); pickImage(); }}>
                <View style={styles.fabMenuIcon}><Ionicons name="image" size={20} color="#fff" /></View>
                <Text style={styles.fabMenuText}>Upload Photo</Text>
+             </TouchableOpacity>
+             <View style={{ height: 1, backgroundColor: '#334155', marginVertical: 8, width: '100%' }} />
+             <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#7c3aed' }]} onPress={() => { setFabMenuVisible(false); handleScanDuplicates(); }}>
+               <View style={[styles.fabMenuIcon, { backgroundColor: '#a78bfa' }]}><Ionicons name="sparkles" size={20} color="#fff" /></View>
+               <Text style={styles.fabMenuText}>AI Duplicate Scan</Text>
+             </TouchableOpacity>
+             <TouchableOpacity style={[styles.fabMenuItem, { backgroundColor: '#3b82f6' }]} onPress={() => { setFabMenuVisible(false); fetchSmartAlbums(); }}>
+               <View style={[styles.fabMenuIcon, { backgroundColor: '#60a5fa' }]}><Ionicons name="albums" size={20} color="#fff" /></View>
+               <Text style={styles.fabMenuText}>Smart AI Albums</Text>
              </TouchableOpacity>
           </View>
         </TouchableOpacity>
