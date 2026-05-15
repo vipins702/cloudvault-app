@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  Image,
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
@@ -15,7 +16,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { DbService } from '../utils/db';
@@ -46,8 +46,9 @@ export default function HomeScreen() {
   const [targetProvider, setTargetProvider] = useState('vercel-blob');
   const [providers, setProviders] = useState<string[]>([]);
   
-  // Gallery Filters
+  // Gallery Filters & Sort
   const [selectedProviderFilter, setSelectedProviderFilter] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
 
   useEffect(() => {
     loadGallery();
@@ -178,11 +179,20 @@ export default function HomeScreen() {
     const files: any[] = [];
     
     // 1. Filter by provider
-    const providerFiltered = selectedProviderFilter 
+    let providerFiltered = selectedProviderFilter 
       ? photos.filter(p => p.provider === selectedProviderFilter)
-      : photos;
+      : [...photos];
 
-    // 2. Filter by current path
+    // 2. Sort the files
+    providerFiltered.sort((a, b) => {
+      if (sortOrder === 'newest') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (sortOrder === 'oldest') return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (sortOrder === 'largest') return (b.size || 0) - (a.size || 0);
+      if (sortOrder === 'smallest') return (a.size || 0) - (b.size || 0);
+      return 0;
+    });
+
+    // 3. Filter by current path
     providerFiltered.forEach(p => {
       const path = p.path || '';
       if (currentPath) {
@@ -200,7 +210,7 @@ export default function HomeScreen() {
       }
     });
     return { visibleFiles: files, visibleFolders: Array.from(folders).sort() };
-  }, [photos, currentPath, selectedProviderFilter]);
+  }, [photos, currentPath, selectedProviderFilter, sortOrder]);
 
   const getProviderBadge = (provider: string) => {
     const map: Record<string, { color: string; letter: string }> = {
@@ -248,9 +258,6 @@ export default function HomeScreen() {
             <Image 
               source={{ uri: item.url }} 
               style={[styles.image, isSelected && { opacity: 0.6 }]} 
-              contentFit="cover"
-              cachePolicy="disk"
-              transition={200}
             />
             <View style={styles.imageOverlay} />
             {item.provider && (
@@ -339,6 +346,20 @@ export default function HomeScreen() {
             <View style={styles.headerActions}>
               <TouchableOpacity 
                 style={styles.actionBtn} 
+                onPress={() => {
+                  const orders: any = ['newest', 'oldest', 'largest', 'smallest'];
+                  const next = orders[(orders.indexOf(sortOrder) + 1) % orders.length];
+                  setSortOrder(next);
+                }}
+              >
+                <Ionicons 
+                  name={sortOrder === 'newest' ? 'calendar' : sortOrder === 'oldest' ? 'time' : sortOrder === 'largest' ? 'arrow-up' : 'arrow-down'} 
+                  size={18} 
+                  color="#94a3b8" 
+                />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.actionBtn} 
                 onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
               >
                 <Ionicons name={viewMode === 'grid' ? 'grid' : 'list'} size={18} color="#94a3b8" />
@@ -394,7 +415,7 @@ export default function HomeScreen() {
           data={[...visibleFolders, ...visibleFiles]}
           renderItem={renderItem}
           numColumns={COLUMN_COUNT}
-          keyExtractor={(item, i) => typeof item === 'string' ? `f-${item}-${i}` : item.id}
+          keyExtractor={(item, i) => typeof item === 'string' ? `f-${item}-${i}` : `${item.id}-${i}`}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
@@ -437,8 +458,7 @@ export default function HomeScreen() {
             <Image 
               source={{ uri: selectedPhoto?.url }} 
               style={styles.fullImage} 
-              contentFit="contain"
-              cachePolicy="disk"
+              resizeMode="contain"
             />
 
             {/* Next Button */}
@@ -493,7 +513,6 @@ export default function HomeScreen() {
               <Image 
                 source={{ uri: selectedImageUri }} 
                 style={styles.uploadPreview} 
-                contentFit="cover" 
               />
             )}
 
