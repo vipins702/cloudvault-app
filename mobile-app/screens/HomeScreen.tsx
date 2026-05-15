@@ -236,7 +236,7 @@ export default function HomeScreen() {
     }
   };
 
-  const createFolder = () => {
+  const createFolder = async () => {
     if (!newFolderName.trim()) return;
     
     try {
