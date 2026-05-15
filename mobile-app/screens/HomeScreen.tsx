@@ -12,11 +12,13 @@ import {
   Modal,
   Platform,
   Alert,
-  ScrollView
+  ScrollView,
+  TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { DbService } from '../utils/db';
 import { Storage } from '../utils/storage';
@@ -38,17 +40,40 @@ export default function HomeScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isTagging, setIsTagging] = useState(false);
 
   // Upload State
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{uri: string, name: string, mimeType?: string, isImage: boolean} | null>(null);
   const [targetProvider, setTargetProvider] = useState('vercel-blob');
   const [providers, setProviders] = useState<string[]>([]);
+  
+  // FAB & Folder State
+  const [fabMenuVisible, setFabMenuVisible] = useState(false);
+  const [folderModalVisible, setFolderModalVisible] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [emptyFolders, setEmptyFolders] = useState<string[]>([]);
   
   // Gallery Filters & Sort
   const [selectedProviderFilter, setSelectedProviderFilter] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'largest' | 'smallest'>('newest');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  
+  // View State
+  const [viewTab, setViewTab] = useState<'photos' | 'albums'>('photos');
+  const [smartAlbums, setSmartAlbums] = useState<any[]>([]);
+  
+  // AI Tools
+  const [isDuplicatesVisible, setIsDuplicatesVisible] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  
+  // Transfer State
+  const [isTransferModalVisible, setIsTransferModalVisible] = useState(false);
+  const [transferTargetProvider, setTransferTargetProvider] = useState('vercel-blob');
+  const [isTransferring, setIsTransferring] = useState(false);
 
   useEffect(() => {
     loadGallery();
@@ -63,7 +88,7 @@ export default function HomeScreen() {
       });
       const conns = await connRes.json();
       if (Array.isArray(conns)) {
-        setProviders(conns.map(c => c.provider));
+        setProviders(Array.from(new Set(conns.map(c => c.provider))));
       }
     } catch (e) {
       console.error('Failed to load providers', e);
@@ -77,25 +102,172 @@ export default function HomeScreen() {
       quality: 0.8,
     });
 
-    if (!result.canceled) {
-      setSelectedImageUri(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setSelectedFile({
+        uri: result.assets[0].uri,
+        name: result.assets[0].uri.split('/').pop() || `image_${Date.now()}.jpg`,
+        mimeType: 'image/jpeg',
+        isImage: true
+      });
       setUploadModalVisible(true);
     }
   };
 
+  const pickDocument = async () => {
+    try {
+      let result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const isImage = asset.mimeType?.startsWith('image/') || false;
+        setSelectedFile({
+          uri: asset.uri,
+          name: asset.name,
+          mimeType: asset.mimeType || 'application/octet-stream',
+          isImage
+        });
+        setUploadModalVisible(true);
+      }
+    } catch (e) {
+      console.log('Document picker error:', e);
+    }
+  };
+
+  const handleAITagging = async () => {
+    if (selectedFileIds.size === 0) return;
+    setIsTagging(true);
+    try {
+      const ids = Array.from(selectedFileIds);
+      let successCount = 0;
+      const token = await Storage.getItem('authToken');
+      for (const id of ids) {
+        const response = await fetch(`${BACKEND_URL}/api/ai/tag/${id}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          }
+        });
+        if (response.ok) successCount++;
+      }
+      if (successCount > 0) {
+        Alert.alert('AI Tagging', `Successfully analyzed and tagged ${successCount} files!`);
+        await loadGallery();
+      } else {
+        Alert.alert('Error', 'Failed to tag files.');
+      }
+    } catch (err) {
+      console.error('AI Tagging failed:', err);
+      Alert.alert('Error', 'An error occurred during AI tagging.');
+    } finally {
+      setIsTagging(false);
+      setSelectionMode(false);
+      setSelectedFileIds(new Set());
+    }
+  };
+
+  const handleScanDuplicates = async () => {
+    setIsScanning(true);
+    setIsDuplicatesVisible(true);
+    try {
+      const token = await Storage.getItem('authToken');
+      const response = await fetch(`${BACKEND_URL}/api/ai/duplicates`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const groups = await response.json();
+      setDuplicateGroups(groups);
+    } catch (err) {
+      console.error('Scan failed:', err);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const fetchSmartAlbums = async () => {
+    try {
+      const token = await Storage.getItem('authToken');
+      const response = await fetch(`${BACKEND_URL}/api/ai/smart-albums`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setSmartAlbums(data);
+    } catch (err) {
+      console.error('Failed to fetch albums:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (viewTab === 'albums') fetchSmartAlbums();
+  }, [viewTab]);
+
+  const handleBulkTransfer = async () => {
+    if (selectedFileIds.size === 0) return;
+    setIsTransferring(true);
+    try {
+      const token = await Storage.getItem('authToken');
+      const res = await fetch(`${BACKEND_URL}/api/files/transfer`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          fileIds: Array.from(selectedFileIds),
+          targetProviderId: transferTargetProvider
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Transfer failed');
+      }
+      
+      Alert.alert('Transfer Success', `Directly moved ${selectedFileIds.size} assets to ${transferTargetProvider}.`);
+      setIsTransferModalVisible(false);
+      setSelectionMode(false);
+      setSelectedFileIds(new Set());
+      await loadGallery();
+    } catch (e: any) {
+      Alert.alert('Transfer Error', e.message);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const createFolder = () => {
+    if (!newFolderName.trim()) return;
+    const folderPath = currentPath ? `${currentPath}/${newFolderName.trim()}` : newFolderName.trim();
+    setEmptyFolders([...emptyFolders, folderPath]);
+    setFolderModalVisible(false);
+    setNewFolderName('');
+  };
+
   const handleUpload = async () => {
-    if (!selectedImageUri) return;
+    if (!selectedFile) return;
     setIsUploading(true);
 
     try {
       const token = await Storage.getItem('authToken');
-      
-      // Read file as base64
-      const base64Data = await FileSystem.readAsStringAsync(selectedImageUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const fileName = selectedImageUri.split('/').pop() || `upload_${Date.now()}.jpg`;
+      let base64Data;
+      if (Platform.OS === 'web') {
+        const fetchRes = await fetch(selectedFile.uri);
+        const blob = await fetchRes.blob();
+        base64Data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result?.toString().split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        base64Data = await FileSystem.readAsStringAsync(selectedFile.uri, {
+          encoding: 'base64',
+        });
+      }
 
       const res = await fetch(`${BACKEND_URL}/api/files/upload`, {
         method: 'POST',
@@ -104,8 +276,8 @@ export default function HomeScreen() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          fileName,
-          contentType: 'image/jpeg',
+          fileName: selectedFile.name,
+          contentType: selectedFile.mimeType,
           base64Data,
           targetProviderId: targetProvider,
           folder: currentPath || ''
@@ -114,9 +286,9 @@ export default function HomeScreen() {
 
       if (!res.ok) throw new Error('Upload failed');
       
-      Alert.alert('Success', 'File uploaded securely to ' + targetProvider);
+      Alert.alert('Success', 'Asset uploaded securely to ' + targetProvider);
       setUploadModalVisible(false);
-      setSelectedImageUri(null);
+      setSelectedFile(null);
       await loadGallery();
     } catch (e: any) {
       Alert.alert('Upload Error', e.message);
@@ -178,10 +350,19 @@ export default function HomeScreen() {
     const folders = new Set<string>();
     const files: any[] = [];
     
-    // 1. Filter by provider
+    // 1. Filter by provider and Search
     let providerFiltered = selectedProviderFilter 
       ? photos.filter(p => p.provider === selectedProviderFilter)
       : [...photos];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      providerFiltered = providerFiltered.filter(p => {
+        const nameMatch = p.name && p.name.toLowerCase().includes(q);
+        const tagMatch = p.tags && Array.isArray(p.tags) && p.tags.some((t: string) => t.toLowerCase().includes(q));
+        return nameMatch || tagMatch;
+      });
+    }
 
     // 2. Sort the files
     providerFiltered.sort((a, b) => {
@@ -209,8 +390,23 @@ export default function HomeScreen() {
         else files.push(p);
       }
     });
+    
+    emptyFolders.forEach(path => {
+      if (currentPath) {
+        const prefix = currentPath + '/';
+        if (path.startsWith(prefix)) {
+          const rel = path.slice(prefix.length);
+          const pts = rel.split('/');
+          if (pts.length === 1 && pts[0]) folders.add(pts[0]);
+        }
+      } else {
+        const pts = path.split('/');
+        if (pts.length === 1 && pts[0]) folders.add(pts[0]);
+      }
+    });
+    
     return { visibleFiles: files, visibleFolders: Array.from(folders).sort() };
-  }, [photos, currentPath, selectedProviderFilter, sortOrder]);
+  }, [photos, currentPath, selectedProviderFilter, sortOrder, emptyFolders, searchQuery]);
 
   const getProviderBadge = (provider: string) => {
     const map: Record<string, { color: string; letter: string }> = {
@@ -226,9 +422,11 @@ export default function HomeScreen() {
     const isFolder = typeof item === 'string';
     const isSelected = !isFolder && selectedFileIds.has(item.id);
 
+    const isList = viewMode === 'list';
+    
     return (
       <TouchableOpacity 
-        style={[styles.item, isSelected && styles.itemSelected]}
+        style={[styles.item, isList && styles.itemList, isSelected && styles.itemSelected]}
         activeOpacity={0.85}
         onLongPress={() => {
           if (!isFolder) {
@@ -254,15 +452,42 @@ export default function HomeScreen() {
             <Text style={styles.folderName} numberOfLines={1}>{item}</Text>
           </View>
         ) : (
-          <View style={styles.photoContent}>
-            <Image 
-              source={{ uri: item.url }} 
-              style={[styles.image, isSelected && { opacity: 0.6 }]} 
-            />
-            <View style={styles.imageOverlay} />
-            {item.provider && (
+          <View style={[styles.photoContent, isList && styles.photoContentList]}>
+            {item.name?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/) || item.contentType?.startsWith('image/') ? (
+              <Image 
+                source={{ uri: item.url }} 
+                style={[styles.image, isList && styles.imageList, isSelected && { opacity: 0.6 }]} 
+              />
+            ) : (
+              <View style={[styles.image, isList && styles.imageList, styles.docPlaceholder, isSelected && { opacity: 0.6 }]}>
+                <Ionicons name={item.name?.toLowerCase().endsWith('.pdf') ? 'document-text' : 'document'} size={isList ? 32 : 48} color="#94a3b8" />
+              </View>
+            )}
+            {!isList && <View style={styles.imageOverlay} />}
+            {item.provider && !isList && (
               <View style={[styles.badge, { backgroundColor: getProviderBadge(item.provider).color }]}>
                 <Text style={styles.badgeText}>{getProviderBadge(item.provider).letter}</Text>
+              </View>
+            )}
+            {isList && (
+              <View style={styles.listDetails}>
+                <Text style={styles.listName} numberOfLines={1}>{item.name}</Text>
+                <Text style={styles.listDate}>
+                  {new Date(item.date).toLocaleDateString()} • {item.size ? (item.size / 1024 / 1024).toFixed(2) + ' MB' : ''}
+                </Text>
+                <View style={[styles.listBadge, { backgroundColor: getProviderBadge(item.provider).color }]}>
+                  <Ionicons name="cloud" size={10} color="#fff" />
+                  <Text style={styles.listBadgeText}>{item.provider}</Text>
+                </View>
+                {item.tags && item.tags.length > 0 && (
+                  <View style={styles.tagContainer}>
+                    {item.tags.slice(0, 3).map((t: string, i: number) => (
+                      <View key={`tag-${i}`} style={styles.tagBadge}>
+                        <Text style={styles.tagText}>#{t}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
             {selectionMode && (
@@ -314,6 +539,16 @@ export default function HomeScreen() {
               <Text style={styles.headerTitle}>{selectedFileIds.size} Selected</Text>
             </View>
             <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleAITagging} disabled={isTagging} style={styles.actionBtn}>
+                {isTagging ? (
+                  <ActivityIndicator color="#a855f7" size="small" />
+                ) : (
+                  <Ionicons name="color-wand" size={22} color="#a855f7" />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setIsTransferModalVisible(true)} style={styles.actionBtn}>
+                <Ionicons name="swap-horizontal" size={22} color="#3b82f6" />
+              </TouchableOpacity>
               <TouchableOpacity onPress={handleBulkDelete} disabled={isDeleting} style={styles.actionBtn}>
                 {isDeleting ? (
                   <ActivityIndicator color="#ef4444" size="small" />
@@ -332,15 +567,28 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ) : null}
               <View>
-                <Text style={styles.headerTitle}>
-                  {currentPath ? currentPath.split('/').pop() : 'Gallery'}
-                </Text>
-                <Text style={styles.subtitle}>
-                  {currentPath 
-                    ? `${visibleFiles.length} files • ${visibleFolders.length} folders`
-                    : `${photos.length} assets across all clouds`
-                  }
-                </Text>
+                {!currentPath ? (
+                  <View style={styles.tabBar}>
+                    <TouchableOpacity 
+                      onPress={() => setViewTab('photos')}
+                      style={[styles.tabItem, viewTab === 'photos' && styles.tabItemActive]}
+                    >
+                      <Text style={[styles.tabText, viewTab === 'photos' && styles.tabTextActive]}>Photos</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => setViewTab('albums')}
+                      style={[styles.tabItem, viewTab === 'albums' && styles.tabItemActive]}
+                    >
+                      <Text style={[styles.tabText, viewTab === 'albums' && styles.tabTextActive]}>Smart Albums</Text>
+                      {smartAlbums.length > 0 && <View style={styles.dot} />}
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.headerTitle}>{currentPath.split('/').pop()}</Text>
+                    <Text style={styles.subtitle}>{visibleFiles.length} files • {visibleFolders.length} folders</Text>
+                  </>
+                )}
               </View>
             </View>
             <View style={styles.headerActions}>
@@ -367,10 +615,33 @@ export default function HomeScreen() {
               <TouchableOpacity onPress={loadGallery} style={styles.actionBtn}>
                 <Ionicons name="refresh" size={18} color="#94a3b8" />
               </TouchableOpacity>
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setIsSearchActive(!isSearchActive)}>
+                <Ionicons name="search" size={18} color={isSearchActive ? "#3b82f6" : "#94a3b8"} />
+              </TouchableOpacity>
             </View>
           </>
         )}
       </View>
+
+      {/* Search Bar */}
+      {isSearchActive && !selectionMode && (
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#64748b" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name, tag (e.g. Beach, Document)..."
+            placeholderTextColor="#64748b"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClear}>
+              <Ionicons name="close-circle" size={20} color="#64748b" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
 
       {/* Provider Filters */}
       {!loading && !selectionMode && providers.length > 0 && (
@@ -399,6 +670,13 @@ export default function HomeScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity 
+              onPress={handleScanDuplicates}
+              style={[styles.filterChip, { backgroundColor: '#7c3aed' }]}
+            >
+              <Ionicons name="copy" size={14} color="#fff" style={{ marginRight: 4 }} />
+              <Text style={styles.filterChipText}>Duplicates</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       )}
@@ -410,12 +688,43 @@ export default function HomeScreen() {
             <Text style={styles.loadingText}>Syncing vault assets...</Text>
           </View>
         </View>
+      ) : viewTab === 'albums' ? (
+        <FlatList
+          data={smartAlbums}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          contentContainerStyle={styles.albumList}
+          renderItem={({ item }) => (
+            <TouchableOpacity 
+              style={styles.albumCard}
+              onPress={() => {
+                setSearchQuery(item.name);
+                setIsSearchActive(true);
+                setViewTab('photos');
+              }}
+            >
+              <Image source={{ uri: item.cover_url }} style={styles.albumCover} />
+              <View style={styles.albumInfo}>
+                <Text style={styles.albumName}>{item.name}</Text>
+                <Text style={styles.albumCount}>{item.count} items</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="sparkles-outline" size={48} color="#334155" />
+              <Text style={styles.emptyTitle}>No Smart Albums</Text>
+              <Text style={styles.emptyText}>Tag some photos with the Magic Wand to create smart albums automatically.</Text>
+            </View>
+          }
+        />
       ) : (
         <FlatList
+          key={viewMode}
           data={[...visibleFolders, ...visibleFiles]}
           renderItem={renderItem}
-          numColumns={COLUMN_COUNT}
-          keyExtractor={(item, i) => typeof item === 'string' ? `f-${item}-${i}` : `${item.id}-${i}`}
+          numColumns={viewMode === 'list' ? 1 : COLUMN_COUNT}
+          keyExtractor={(item, i) => typeof item === 'string' ? `f-${item}-${i}` : `${item.id}-${i}-${Math.random()}`}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
@@ -472,6 +781,26 @@ export default function HomeScreen() {
           <View style={styles.viewerFooter}>
             <View style={styles.footerInfo}>
               <Text style={styles.fileName} numberOfLines={1}>{selectedPhoto?.name}</Text>
+              
+              {selectedPhoto?.tags && selectedPhoto.tags.length > 0 && (
+                <View style={styles.tagContainer}>
+                  {selectedPhoto.tags.map((t: string, i: number) => (
+                    <View key={`tag-${i}`} style={styles.tagBadge}>
+                      <Text style={styles.tagText}>#{t}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {selectedPhoto?.metadata?.ocr_text && (
+                <View style={[styles.ocrContainer, { marginTop: 12, marginBottom: 0 }]}>
+                  <Text style={styles.ocrTitle}>
+                    <Ionicons name="document-text" size={14} color="#60a5fa" /> EXTRACTED TEXT
+                  </Text>
+                  <Text style={styles.ocrText} numberOfLines={4}>{selectedPhoto.metadata.ocr_text}</Text>
+                </View>
+              )}
+
               <View style={styles.metaRow}>
                 {selectedPhoto?.provider && (
                   <View style={styles.metaBadge}>
@@ -491,12 +820,60 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Upload FAB */}
-      {!selectionMode && (
-        <TouchableOpacity style={styles.fab} onPress={pickImage}>
-          <Ionicons name="add" size={32} color="#fff" />
+      {/* FAB Overlay */}
+      {fabMenuVisible && (
+        <TouchableOpacity style={styles.fabOverlay} activeOpacity={1} onPress={() => setFabMenuVisible(false)}>
+          <View style={styles.fabMenu}>
+             <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabMenuVisible(false); setFolderModalVisible(true); }}>
+               <View style={styles.fabMenuIcon}><Ionicons name="folder-open" size={20} color="#fff" /></View>
+               <Text style={styles.fabMenuText}>New Folder</Text>
+             </TouchableOpacity>
+             <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabMenuVisible(false); pickDocument(); }}>
+               <View style={styles.fabMenuIcon}><Ionicons name="document" size={20} color="#fff" /></View>
+               <Text style={styles.fabMenuText}>Upload File</Text>
+             </TouchableOpacity>
+             <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabMenuVisible(false); pickImage(); }}>
+               <View style={styles.fabMenuIcon}><Ionicons name="image" size={20} color="#fff" /></View>
+               <Text style={styles.fabMenuText}>Upload Photo</Text>
+             </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       )}
+
+      {/* Main FAB */}
+      {!selectionMode && (
+        <TouchableOpacity style={styles.fab} onPress={() => setFabMenuVisible(!fabMenuVisible)}>
+          <Ionicons name={fabMenuVisible ? "close" : "add"} size={32} color="#fff" />
+        </TouchableOpacity>
+      )}
+
+      {/* Create Folder Modal */}
+      <Modal visible={folderModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.folderModal}>
+            <Text style={styles.modalTitle}>New Folder</Text>
+            <Text style={styles.modalLabel}>Enter folder name</Text>
+            <View style={styles.inputGroup}>
+               <TextInput
+                 style={styles.folderInput}
+                 placeholder="e.g. Invoices 2024"
+                 placeholderTextColor="#475569"
+                 value={newFolderName}
+                 onChangeText={setNewFolderName}
+                 autoFocus
+               />
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => { setFolderModalVisible(false); setNewFolderName(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSubmit} onPress={createFolder}>
+                <Text style={styles.modalSubmitText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Upload Settings Modal */}
       <Modal visible={uploadModalVisible} animationType="slide" transparent>
@@ -509,12 +886,17 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {selectedImageUri && (
+            {selectedFile && selectedFile.isImage ? (
               <Image 
-                source={{ uri: selectedImageUri }} 
+                source={{ uri: selectedFile.uri }} 
                 style={styles.uploadPreview} 
               />
-            )}
+            ) : selectedFile ? (
+              <View style={[styles.uploadPreview, styles.docPlaceholder]}>
+                <Ionicons name="document-text" size={64} color="#3b82f6" />
+                <Text style={{color: '#fff', marginTop: 10}}>{selectedFile.name}</Text>
+              </View>
+            ) : null}
 
             <Text style={styles.modalLabel}>Select Target Cloud</Text>
             <View style={styles.providerSelect}>
@@ -549,6 +931,116 @@ export default function HomeScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.uploadBtnText}>Upload Now</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      {/* Duplicate Scanner Modal */}
+      <Modal visible={isDuplicatesVisible} animationType="slide" presentationStyle="fullScreen">
+        <View style={styles.dupModal}>
+          <View style={styles.dupHeader}>
+            <Text style={styles.dupTitle}>Possible Duplicates</Text>
+            <TouchableOpacity onPress={() => setIsDuplicatesVisible(false)}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          
+          {isScanning ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color="#7c3aed" />
+              <Text style={styles.loadingText}>Analyzing hash similarities...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={duplicateGroups}
+              keyExtractor={(_, i) => `group-${i}`}
+              contentContainerStyle={{ paddingBottom: 40 }}
+              ListEmptyComponent={
+                <View style={styles.centered}>
+                  <Ionicons name="shield-checkmark" size={64} color="#334155" />
+                  <Text style={[styles.emptyTitle, { marginTop: 20 }]}>No Duplicates!</Text>
+                  <Text style={styles.emptyText}>Your vault is perfectly organized.</Text>
+                </View>
+              }
+              renderItem={({ item: group }) => (
+                <View style={styles.dupGroup}>
+                  <View style={styles.dupGroupHeader}>
+                    <Text style={styles.dupGroupTitle}>{group.length} COPIES FOUND</Text>
+                    <Text style={styles.dupGroupTitle}>{(group[0]?.size_bytes ? group[0].size_bytes / 1024 / 1024 : 0).toFixed(2)} MB EACH</Text>
+                  </View>
+                  {group.map((file: any) => (
+                    <View key={file.id} style={styles.dupItem}>
+                      <Image source={{ uri: file.storage_url }} style={styles.dupItemImg} />
+                      <View style={styles.dupItemInfo}>
+                        <Text style={styles.dupItemName} numberOfLines={1}>{file.name}</Text>
+                        <Text style={styles.dupItemMeta}>{file.folder || 'Root'}</Text>
+                      </View>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          // Allow user to jump to this file or delete it
+                          setSelectedPhoto({...file, url: file.storage_url, date: new Date().toISOString()});
+                          setIsDuplicatesVisible(false);
+                        }}
+                      >
+                        <Ionicons name="eye" size={20} color="#3b82f6" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            />
+          )}
+        </View>
+      </Modal>
+
+      {/* Direct Transfer Modal */}
+      <Modal visible={isTransferModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.uploadModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Transfer {selectedFileIds.size} Assets</Text>
+              <TouchableOpacity onPress={() => setIsTransferModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.infoBox}>
+              <Ionicons name="infinite" size={20} color="#3b82f6" />
+              <Text style={styles.infoText}>
+                Moving assets server-to-server. This preserves your mobile data.
+              </Text>
+            </View>
+
+            <Text style={styles.modalLabel}>Select Destination Cloud</Text>
+            <View style={styles.providerSelect}>
+              {providers.map(p => (
+                <TouchableOpacity 
+                  key={p}
+                  style={[styles.providerBtn, transferTargetProvider === p && styles.providerBtnActive]}
+                  onPress={() => setTransferTargetProvider(p)}
+                >
+                  <Ionicons 
+                    name={p === 'aws-s3' ? 'logo-amazon' : p === 'google-photos' ? 'logo-google' : 'triangle'} 
+                    size={20} 
+                    color={transferTargetProvider === p ? '#fff' : '#64748b'} 
+                  />
+                  <Text style={[styles.providerText, transferTargetProvider === p && styles.providerTextActive]}>
+                    {p === 'aws-s3' ? 'AWS S3' : p === 'google-photos' ? 'Photos' : 'Vercel'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.uploadBtn, isTransferring && styles.btnDisabled]} 
+              onPress={handleBulkTransfer}
+              disabled={isTransferring}
+            >
+              {isTransferring ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.uploadBtnText}>Begin Cloud-to-Cloud Transfer</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -634,6 +1126,12 @@ const styles = StyleSheet.create({
     borderColor: '#3b82f6',
     transform: [{ scale: 0.95 }]
   },
+  itemList: {
+    width: '100%',
+    height: 80,
+    flexDirection: 'row',
+    marginBottom: 8
+  },
   folderContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   folderIcon: { 
     width: 52, height: 52, borderRadius: 16, 
@@ -642,7 +1140,14 @@ const styles = StyleSheet.create({
   },
   folderName: { color: '#94a3b8', fontSize: 11, fontWeight: '700', marginTop: 6 },
   photoContent: { flex: 1, position: 'relative' },
+  photoContentList: { flexDirection: 'row', alignItems: 'center' },
   image: { width: '100%', height: '100%' },
+  imageList: { width: 80, height: '100%', borderRadius: 8 },
+  listDetails: { flex: 1, paddingHorizontal: 12, justifyContent: 'center' },
+  listName: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  listDate: { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
+  listBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  listBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold', marginLeft: 4 },
   imageOverlay: { 
     position: 'absolute', bottom: 0, left: 0, right: 0, height: 30, 
     backgroundColor: 'transparent'
@@ -680,8 +1185,7 @@ const styles = StyleSheet.create({
   closeBtn: { 
     width: 40, height: 40, borderRadius: 20, 
     backgroundColor: 'rgba(255,255,255,0.1)', 
-    justifyContent: 'center', alignItems: 'center',
-    backdropFilter: 'blur(10px)' as any
+    justifyContent: 'center', alignItems: 'center'
   },
   viewerActions: { flexDirection: 'row', gap: 8 },
   viewerAction: { 
@@ -756,5 +1260,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#3b82f6', padding: 16, borderRadius: 16, alignItems: 'center' 
   },
   btnDisabled: { backgroundColor: '#334155', opacity: 0.7 },
-  uploadBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
+  uploadBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  docPlaceholder: { backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
+  fabOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 },
+  fabMenu: { position: 'absolute', bottom: 90, right: 20, alignItems: 'flex-end', gap: 12 },
+  fabMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#1e293b', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, borderWidth: 1, borderColor: '#334155' },
+  fabMenuIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3b82f6', justifyContent: 'center', alignItems: 'center' },
+  fabMenuText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  folderModal: { backgroundColor: '#1e293b', margin: 20, borderRadius: 24, padding: 24, width: '90%', alignSelf: 'center', marginBottom: Platform.OS === 'ios' ? 100 : 20 },
+  folderInput: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#334155', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16 },
+  inputGroup: { marginBottom: 24 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', marginHorizontal: 20, marginTop: 12, borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, borderColor: '#334155' },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, color: '#fff', fontSize: 14 },
+  searchClear: { padding: 4 },
+  tagContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  tagBadge: { backgroundColor: 'rgba(59,130,246,0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)' },
+  tagText: { color: '#60a5fa', fontSize: 10, fontWeight: '700' },
+  ocrContainer: { backgroundColor: 'rgba(59,130,246,0.05)', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(59,130,246,0.1)' },
+  ocrTitle: { color: '#60a5fa', fontSize: 10, fontWeight: '900', marginBottom: 8, letterSpacing: 1 },
+  ocrText: { color: '#cbd5e1', fontSize: 13, lineHeight: 20 },
+  dupModal: { backgroundColor: '#0f172a', flex: 1, paddingTop: 60 },
+  dupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
+  dupTitle: { color: '#fff', fontSize: 20, fontWeight: '900' },
+  dupGroup: { backgroundColor: '#1e293b', marginHorizontal: 20, marginBottom: 20, borderRadius: 20, padding: 16, borderLeftWidth: 4, borderLeftColor: '#7c3aed' },
+  dupGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  dupGroupTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
+  dupItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', padding: 12, borderRadius: 12, marginBottom: 8 },
+  dupItemImg: { width: 40, height: 40, borderRadius: 8, marginRight: 12 },
+  dupItemInfo: { flex: 1 },
+  dupItemName: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  dupItemMeta: { color: '#64748b', fontSize: 11 },
+  tabBar: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  tabItem: { paddingBottom: 4, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabItemActive: { borderBottomColor: '#3b82f6' },
+  tabText: { color: '#64748b', fontSize: 13, fontWeight: 'bold' },
+  tabTextActive: { color: '#fff' },
+  dot: { position: 'absolute', top: -2, right: -8, width: 4, height: 4, borderRadius: 2, backgroundColor: '#3b82f6' },
+  albumList: { padding: 16 },
+  albumCard: { flex: 1, margin: 8, backgroundColor: '#1e293b', borderRadius: 16, overflow: 'hidden', height: 200 },
+  albumCover: { width: '100%', height: 140 },
+  albumInfo: { padding: 12 },
+  albumName: { color: '#fff', fontSize: 15, fontWeight: 'bold', textTransform: 'capitalize' },
+  albumCount: { color: '#64748b', fontSize: 12, marginTop: 2 }
 });

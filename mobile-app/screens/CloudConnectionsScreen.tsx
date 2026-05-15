@@ -201,7 +201,7 @@ export default function CloudConnectionsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.content} style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>Cloud Fabric</Text>
@@ -277,50 +277,52 @@ export default function CloudConnectionsScreen() {
       <Modal visible={modalVisible} transparent animationType="slide">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBg}>
           <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View style={[styles.modalIcon, { backgroundColor: activeProvider?.color + '20' }]}>
-                <Ionicons name={activeProvider?.icon as any} size={24} color={activeProvider?.color === '#000000' ? '#fff' : activeProvider?.color} />
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              <View style={styles.modalHeader}>
+                <View style={[styles.modalIcon, { backgroundColor: activeProvider?.color + '20' }]}>
+                  <Ionicons name={activeProvider?.icon as any} size={24} color={activeProvider?.color === '#000000' ? '#fff' : activeProvider?.color} />
+                </View>
+                <Text style={styles.modalTitle}>Configure {activeProvider?.name}</Text>
+                <Text style={styles.modalSubtitle}>Enter credentials to link this provider.</Text>
               </View>
-              <Text style={styles.modalTitle}>Configure {activeProvider?.name}</Text>
-              <Text style={styles.modalSubtitle}>Enter credentials to link this provider.</Text>
-            </View>
 
-            {activeProvider?.fields?.map((field: any) => (
-              <View key={field.id} style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{field.label}</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={`Enter ${field.label}`}
-                  placeholderTextColor="#475569"
-                  secureTextEntry={field.secure}
-                  value={configValues[field.id] || ''}
-                  onChangeText={(val) => setConfigValues(prev => ({ ...prev, [field.id]: val }))}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
+              {activeProvider?.fields?.map((field: any) => (
+                <View key={field.id} style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>{field.label}</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder={`Enter ${field.label}`}
+                    placeholderTextColor="#475569"
+                    secureTextEntry={field.secure}
+                    value={configValues[field.id] || ''}
+                    onChangeText={(val) => setConfigValues(prev => ({ ...prev, [field.id]: val }))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              ))}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity 
+                  style={styles.modalCancel} 
+                  onPress={() => setModalVisible(false)}
+                  disabled={connecting}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modalSubmit, connecting && { opacity: 0.7 }]} 
+                  onPress={handleConnectAPI}
+                  disabled={connecting}
+                >
+                  {connecting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.modalSubmitText}>Connect & Save</Text>
+                  )}
+                </TouchableOpacity>
               </View>
-            ))}
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity 
-                style={styles.modalCancel} 
-                onPress={() => setModalVisible(false)}
-                disabled={connecting}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.modalSubmit, connecting && { opacity: 0.7 }]} 
-                onPress={handleConnectAPI}
-                disabled={connecting}
-              >
-                {connecting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Connect & Save</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -369,7 +371,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 32, 
     borderTopRightRadius: 32, 
     padding: 30,
-    paddingBottom: Platform.OS === 'ios' ? 50 : 30
+    paddingBottom: Platform.OS === 'ios' ? 50 : 30,
+    maxHeight: '90%'
   },
   modalHeader: { alignItems: 'center', marginBottom: 30 },
   modalIcon: { width: 64, height: 64, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },

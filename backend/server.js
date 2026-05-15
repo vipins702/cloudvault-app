@@ -189,13 +189,14 @@ app.get('/api/cloud/photos', authenticateToken, async (req, res) => {
     // Map to the format the mobile app expects
     const formatted = files.map(f => ({
       id: f.id,
-      url: f.storage_url,
+      url: f.storage_url || '',
       name: f.name,
       path: f.storage_key || '',
       provider: f.provider || 'vercel-blob',
       size: f.size_bytes,
       date: f.uploaded_at,
-      type: f.content_type?.startsWith('video') ? 'video' : 'image'
+      type: f.content_type?.startsWith('video') ? 'video' : 'image',
+      tags: f.tags || []
     }));
 
     res.json(formatted);
@@ -265,6 +266,40 @@ app.delete('/api/connections/:provider', authenticateToken, async (req, res) => 
   }
 });
 
+// ========== SYSTEM SETTINGS ROUTES ==========
+
+app.get('/api/admin/settings', authenticateToken, async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM system_settings WHERE id = 'global'`;
+    res.json(rows[0] || { active_llm_provider: 'gemini', llm_config: {} });
+  } catch (err) {
+    // If table doesn't exist yet, return defaults
+    if (err.message.includes('relation "system_settings" does not exist')) {
+      res.json({ active_llm_provider: 'gemini', llm_config: {} });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+app.post('/api/admin/settings', authenticateToken, async (req, res) => {
+  const { active_llm_provider, llm_config } = req.body;
+  try {
+    const now = new Date().toISOString();
+    await sql`
+      INSERT INTO system_settings (id, active_llm_provider, llm_config, created_at, updated_at)
+      VALUES ('global', ${active_llm_provider}, ${llm_config}, ${now}, ${now})
+      ON CONFLICT (id) DO UPDATE SET 
+        active_llm_provider = EXCLUDED.active_llm_provider,
+        llm_config = EXCLUDED.llm_config,
+        updated_at = EXCLUDED.updated_at
+    `;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ========== TRANSFER & BULK ROUTES (SaaS Master Engine) ==========
 
 app.post('/api/files/upload', authenticateToken, async (req, res) => {
@@ -317,16 +352,20 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
     // Using base64 length roughly gives size in bytes
     const sizeBytes = Math.round((base64Data.length * 3) / 4);
 
+    // User requested manual AI tagging only to save costs. 
+    // AI is NOT called automatically on upload anymore.
+    const tags = [];
+
     await sql`
       INSERT INTO files (
         id, tenant_id, connection_id, storage_key, storage_url, 
         name, content_type, size_bytes, folder, 
-        uploaded_by, uploaded_at
+        uploaded_by, uploaded_at, tags
       )
       VALUES (
         ${fileId}, ${tenantId}, ${targetConn.id}, ${newKey}, ${newUrl},
         ${fileName}, ${contentType}, ${sizeBytes}, ${folder || ''},
-        ${req.user.id}, ${now}
+        ${req.user.id}, ${now}, ${tags}
       )
     `;
 
@@ -538,12 +577,92 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
   }
 });
 
-// ========== AI ROUTES ==========
+// ========== AI SERVICE ROUTES ==========
+
+app.post('/api/ai/tag/:id', authenticateToken, async (req, res) => {
+  const fileId = req.params.id;
+  try {
+    // 1. Fetch file record
+    const files = await sql`SELECT * FROM files WHERE id = ${fileId} AND tenant_id = ${req.user.tenantId}`;
+    if (files.length === 0) return res.status(404).json({ error: 'File not found' });
+    const file = files[0];
+
+    // 2. We need the image as base64 to avoid cloud URL issues with AI
+    if (!file.storage_url) throw new Error('File storage URL is missing');
+    
+    console.log(`[TaggingEngine] Fetching image from: ${file.storage_url}`);
+    const response = await fetch(file.storage_url);
+    if (!response.ok) throw new Error(`Failed to fetch image from storage: ${response.statusText}`);
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const base64Data = Buffer.from(arrayBuffer).toString('base64');
+
+    // 3. Get Settings
+    let settings = {};
+    try {
+      const settingsRows = await sql`SELECT * FROM system_settings WHERE id = 'global'`;
+      if (settingsRows[0]) settings = settingsRows[0];
+    } catch (e) {}
+
+    // 4. Run AI (Tags + OCR)
+    const [tags, ocrText] = await Promise.all([
+      AIService.detectObjects(file.storage_url, file.name, base64Data, settings),
+      AIService.performOCR(base64Data, settings)
+    ]);
+
+    // 5. Update DB (Add tags and OCR to metadata)
+    const metadata = { ...file.metadata, ocr_text: ocrText, processed_at: new Date().toISOString() };
+    await sql`UPDATE files SET tags = ${tags}, metadata = ${metadata} WHERE id = ${fileId}`;
+
+    res.json({ success: true, tags, ocrText });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/ai/duplicates', authenticateToken, async (req, res) => {
   try {
     const duplicates = await AIService.findDuplicates(sql, req.user.tenantId);
     res.json(duplicates);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ai/smart-albums', authenticateToken, async (req, res) => {
+  try {
+    // 1. Get all files with tags for this tenant
+    const files = await sql`
+      SELECT id, name, storage_url, tags, folder 
+      FROM files 
+      WHERE tenant_id = ${req.user.tenantId} 
+      AND array_length(tags, 1) > 0
+    `;
+
+    // 2. Map tags to albums
+    const albumMap = {};
+    files.forEach(file => {
+      file.tags.forEach(tag => {
+        if (!albumMap[tag]) {
+          albumMap[tag] = {
+            id: `album-${tag}`,
+            name: tag,
+            count: 0,
+            cover_url: file.storage_url,
+            files: []
+          };
+        }
+        albumMap[tag].count++;
+        // Just store the first 4 for preview if needed
+        if (albumMap[tag].files.length < 4) {
+          albumMap[tag].files.push(file.storage_url);
+        }
+      });
+    });
+
+    // 3. Convert to array and sort by count
+    const albums = Object.values(albumMap).sort((a, b) => b.count - a.count);
+    res.json(albums);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

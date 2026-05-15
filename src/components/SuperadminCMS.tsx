@@ -34,6 +34,41 @@ export function SuperadminCMS({
 }: Props) {
     const [activeTab, setActiveTab] = useState<'overview' | 'tenants' | 'logs' | 'settings'>('overview');
     const [searchQuery, setSearchQuery] = useState('');
+    const [llmProvider, setLlmProvider] = useState('gemini');
+    const [llmConfig, setLlmConfig] = useState<any>({
+        openai_api_key: '', gemini_api_key: '', qwen_api_key: '', glm_api_key: '', custom_api_key: '', custom_base_url: '', custom_model: ''
+    });
+    const [settingsSaving, setSettingsSaving] = useState(false);
+
+    React.useEffect(() => {
+        if (activeTab === 'settings') {
+            fetch(process.env.EXPO_PUBLIC_API_URL + '/api/admin/settings', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('pixelvault_token') || ''}` }
+            }).then(r => r.json()).then(data => {
+                if (data.active_llm_provider) setLlmProvider(data.active_llm_provider);
+                if (data.llm_config) setLlmConfig(data.llm_config);
+            }).catch(console.error);
+        }
+    }, [activeTab]);
+
+    const handleSaveSettings = async () => {
+        setSettingsSaving(true);
+        try {
+            await fetch(process.env.EXPO_PUBLIC_API_URL + '/api/admin/settings', {
+                method: 'POST',
+                headers: { 
+                    'Authorization': `Bearer ${localStorage.getItem('pixelvault_token') || ''}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ active_llm_provider: llmProvider, llm_config: llmConfig })
+            });
+            alert('Settings saved globally!');
+        } catch (e) {
+            console.error(e);
+            alert('Failed to save settings');
+        }
+        setSettingsSaving(false);
+    };
 
     const formatSize = (bytes: number) => {
         if (bytes === 0) return '0 B';
@@ -318,6 +353,108 @@ export function SuperadminCMS({
                                         </div>
                                     </button>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'settings' && (
+                        <div className="animate-fade-in space-y-6 max-w-4xl">
+                            <div>
+                                <h3 className="text-xl font-bold">Global AI & System Settings</h3>
+                                <p className="text-sm text-white/20 mt-1">Configure your LLM providers for Image Auto-Tagging and OCR.</p>
+                            </div>
+
+                            <div className="bg-[#0c0c12] border border-white/[0.05] rounded-3xl p-8 space-y-8">
+                                <div>
+                                    <h4 className="text-sm font-bold text-white/40 uppercase tracking-wider mb-4">Active AI Provider</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        {['gemini', 'openai', 'qwen', 'glm', 'custom'].map(p => (
+                                            <button
+                                                key={p}
+                                                onClick={() => setLlmProvider(p)}
+                                                className={cn(
+                                                    "p-4 rounded-xl border text-left transition-all",
+                                                    llmProvider === p 
+                                                        ? "bg-indigo-500/10 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]" 
+                                                        : "bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.05]"
+                                                )}
+                                            >
+                                                <div className={cn("font-bold capitalize", llmProvider === p ? "text-indigo-400" : "text-white")}>{p === 'glm' ? 'GLM (Zhipu)' : p}</div>
+                                                <div className="text-xs text-white/30 mt-1">Vision Model</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-bold text-white/40 uppercase tracking-wider">Provider Configuration</h4>
+                                    
+                                    {llmProvider === 'gemini' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">Gemini API Key (Google AI Studio)</label>
+                                                <input type="password" value={llmConfig.gemini_api_key || ''} onChange={e => setLlmConfig({...llmConfig, gemini_api_key: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="AIzaSy..." />
+                                                <p className="text-xs text-white/30 mt-2">15 RPM Free Tier. Model: gemini-1.5-flash</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {llmProvider === 'openai' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">OpenAI API Key</label>
+                                                <input type="password" value={llmConfig.openai_api_key || ''} onChange={e => setLlmConfig({...llmConfig, openai_api_key: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="sk-..." />
+                                                <p className="text-xs text-white/30 mt-2">Model: gpt-4o-mini</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {llmProvider === 'qwen' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">DashScope API Key (Alibaba)</label>
+                                                <input type="password" value={llmConfig.qwen_api_key || ''} onChange={e => setLlmConfig({...llmConfig, qwen_api_key: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="sk-..." />
+                                                <p className="text-xs text-white/30 mt-2">Model: qwen-vl-max</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {llmProvider === 'glm' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">Zhipu BigModel API Key</label>
+                                                <input type="password" value={llmConfig.glm_api_key || ''} onChange={e => setLlmConfig({...llmConfig, glm_api_key: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" />
+                                                <p className="text-xs text-white/30 mt-2">Model: glm-4v</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {llmProvider === 'custom' && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">Custom Base URL (OpenAI Compatible)</label>
+                                                <input type="text" value={llmConfig.custom_base_url || ''} onChange={e => setLlmConfig({...llmConfig, custom_base_url: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="https://api.yourprovider.com/v1" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">API Key</label>
+                                                <input type="password" value={llmConfig.custom_api_key || ''} onChange={e => setLlmConfig({...llmConfig, custom_api_key: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/60 mb-2">Vision Model Name</label>
+                                                <input type="text" value={llmConfig.custom_model || ''} onChange={e => setLlmConfig({...llmConfig, custom_model: e.target.value})} className="w-full bg-[#07070a] border border-white/[0.1] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="e.g. llama-3.2-11b-vision-preview" />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="pt-6 border-t border-white/[0.05]">
+                                    <button 
+                                        onClick={handleSaveSettings}
+                                        disabled={settingsSaving}
+                                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center min-w-[120px]"
+                                    >
+                                        {settingsSaving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Save System Configuration'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

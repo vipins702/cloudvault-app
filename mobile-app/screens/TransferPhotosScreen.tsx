@@ -191,7 +191,16 @@ export default function TransferPhotosScreen() {
             <Text style={styles.sectionTitle}>2. Select Target Provider</Text>
             <View style={styles.providerSelect}>
               {providers.length === 0 ? (
-                <Text style={styles.emptyText}>No providers connected.</Text>
+                <View style={styles.emptyCloudContainer}>
+                  <Ionicons name="cloud-offline" size={48} color="#475569" />
+                  <Text style={styles.emptyText}>No Clouds Connected Yet</Text>
+                  <TouchableOpacity 
+                    style={styles.connectNowBtn}
+                    onPress={() => Alert.alert('Connect Cloud', 'Go to the Clouds tab to link your storage provider.')}
+                  >
+                    <Text style={styles.connectNowText}>Link a Cloud Now</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
                 providers.map(p => (
                   <TouchableOpacity 
@@ -340,5 +349,8 @@ const styles = StyleSheet.create({
   transferBtn: { backgroundColor: '#3b82f6', padding: 20, borderRadius: 20, alignItems: 'center', shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15 },
   btnDisabled: { backgroundColor: '#1e293b', shadowOpacity: 0 },
   btnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  row: { flexDirection: 'row', alignItems: 'center' }
+  row: { flexDirection: 'row', alignItems: 'center' },
+  emptyCloudContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 20, width: '100%' },
+  connectNowBtn: { marginTop: 15, backgroundColor: '#3b82f620', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#3b82f6' },
+  connectNowText: { color: '#3b82f6', fontWeight: 'bold' }
 });

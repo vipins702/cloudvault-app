@@ -11,14 +11,14 @@ export default function SplashScreen() {
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }),
-      Animated.timing(slideUp, { toValue: 0, duration: 800, useNativeDriver: true }),
+      Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(slideUp, { toValue: 0, duration: 800, useNativeDriver: Platform.OS !== 'web' }),
     ]).start();
 
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 0.6, duration: 1200, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1200, useNativeDriver: Platform.OS !== 'web' }),
+        Animated.timing(pulseAnim, { toValue: 0.6, duration: 1200, useNativeDriver: Platform.OS !== 'web' }),
       ])
     ).start();
   }, []);

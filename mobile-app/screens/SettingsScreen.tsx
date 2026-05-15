@@ -284,8 +284,8 @@ export default function SettingsScreen({ onLogout }: any) {
                 >
                   <Image source={{ uri: item.storage_url }} style={styles.duplicateImg} />
                   <View style={styles.duplicateInfo}>
-                    <Text style={styles.duplicateName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.duplicateSize}>{(item.size_bytes / 1024 / 1024).toFixed(2)} MB</Text>
+                    <Text style={styles.duplicateName} numberOfLines={1}>{item?.name}</Text>
+                    <Text style={styles.duplicateSize}>{(item?.size_bytes ? item.size_bytes / 1024 / 1024 : 0).toFixed(2)} MB</Text>
                   </View>
                   <View style={styles.checkbox}>
                     {isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}
