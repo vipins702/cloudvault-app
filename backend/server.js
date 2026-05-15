@@ -105,6 +105,55 @@ const getVercelToken = async (tenantId) => {
   return process.env.BLOB_READ_WRITE_TOKEN;
 };
 
+// --- GOOGLE TOKEN REFRESH HELPER ---
+const getValidGoogleToken = async (connection) => {
+  let creds = JSON.parse(connection.credentials_encrypted);
+  const now = Date.now();
+  
+  // If token is still valid (with 5 min buffer), return it
+  if (creds.expires_at && (creds.expires_at - now > 300000)) {
+    return creds.access_token || creds.token;
+  }
+
+  // Otherwise, refresh it
+  if (!creds.refresh_token) {
+    throw new Error('No refresh token available. Please re-link Google account.');
+  }
+
+  console.log(`[GoogleAuth] Token expired for ${connection.id}. Refreshing...`);
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: creds.refresh_token,
+      grant_type: 'refresh_token'
+    })
+  });
+
+  const data = await response.json();
+  if (!data.access_token) {
+    console.error('[GoogleAuth] Refresh failed:', data);
+    throw new Error('Failed to refresh Google token');
+  }
+
+  // Update DB with new token
+  const newCreds = {
+    ...creds,
+    access_token: data.access_token,
+    expires_at: now + (data.expires_in * 1000)
+  };
+
+  await sql`
+    UPDATE storage_connections 
+    SET credentials_encrypted = ${JSON.stringify(newCreds)}, updated_at = NOW()
+    WHERE id = ${connection.id}
+  `;
+
+  return data.access_token;
+};
+
 // ========== AUTH ROUTES ==========
 
 app.post('/api/login', async (req, res) => {
@@ -350,7 +399,7 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
         throw new Error('Failed to parse Google credentials');
       }
       
-      const decryptedToken = creds.access_token || creds.token;
+      const decryptedToken = await getValidGoogleToken(targetConn);
       if (!decryptedToken) throw new Error('No access token for Google Photos');
 
       console.log(`[UploadEngine] Uploading bytes to Google Photos API...`);
@@ -603,7 +652,7 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
           continue;
         }
         
-        const decryptedToken = creds.access_token || creds.token;
+        const decryptedToken = await getValidGoogleToken(targetConn);
         if (!decryptedToken) continue;
         
         console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
@@ -661,6 +710,10 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
       `;
       
       successfulTransfers.push({ id: currentFileId, url: newUrl });
+    }
+
+    if (successfulTransfers.length === 0 && idsToTransfer.length > 0) {
+      throw new Error('All transfers failed. Check if target cloud supports these file types (e.g. Google Photos only accepts images/videos).');
     }
 
     res.json({ success: true, transfers: successfulTransfers });
@@ -769,7 +822,7 @@ app.get('/auth/google', (req, res) => {
   const userToken = req.query.token || '';
   const state = Buffer.from(JSON.stringify({ jwt: userToken })).toString('base64');
   
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/photoslibrary.readonly&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/photoslibrary&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
   res.redirect(url);
 });
 
