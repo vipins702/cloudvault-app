@@ -341,6 +341,7 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
       const uploadData = await uploadResponse.json();
       newUrl = uploadData.url;
       newKey = uploadData.pathname;
+      console.log(`[UploadEngine] Successfully uploaded to Vercel: ${newUrl}`);
     } else if (targetProviderId === 'google-photos') {
       let creds;
       try {
@@ -392,6 +393,7 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
       const mediaItem = createData.newMediaItemResults[0].mediaItem;
       newUrl = mediaItem.baseUrl;
       newKey = mediaItem.id;
+      console.log(`[UploadEngine] Successfully uploaded to Google Photos: ${newKey}`);
     } else {
       throw new Error(`Upload to ${targetProviderId} not yet implemented on master backend`);
     }
@@ -513,7 +515,8 @@ app.post('/api/folders/create', authenticateToken, async (req, res) => {
         body: JSON.stringify({ album: { title: name } })
       });
 
-      if (!response.ok) throw new Error('Failed to create album on Google Photos');
+      if (!response.ok) throw new Error(`Failed to create album on Google Photos: ${response.statusText}`);
+      console.log(`[FolderEngine] Successfully created Album: ${name}`);
     }
     
     // Even if it's virtual (like Vercel), we log it

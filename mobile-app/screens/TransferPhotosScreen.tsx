@@ -305,7 +305,7 @@ export default function TransferPhotosScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
-  content: { padding: 25, flex: 1 },
+  content: { padding: 25 },
   header: { marginBottom: 30 },
   title: { fontSize: 36, fontWeight: '900', color: '#fff', letterSpacing: -1 },
   subtitle: { fontSize: 14, color: '#64748b', marginTop: 8, fontWeight: '500' },

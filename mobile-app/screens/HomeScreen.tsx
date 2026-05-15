@@ -103,10 +103,11 @@ export default function HomeScreen() {
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
       setSelectedFile({
-        uri: result.assets[0].uri,
-        name: result.assets[0].uri.split('/').pop() || `image_${Date.now()}.jpg`,
-        mimeType: 'image/jpeg',
+        uri: asset.uri,
+        name: asset.fileName || `image_${Date.now()}.${asset.mimeType?.split('/')[1] || 'jpg'}`,
+        mimeType: asset.mimeType || 'image/jpeg',
         isImage: true
       });
       setUploadModalVisible(true);
@@ -736,9 +737,42 @@ export default function HomeScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="sparkles-outline" size={48} color="#334155" />
+              <View style={styles.emptyIcon}>
+                <Ionicons name="sparkles-outline" size={40} color="#3b82f6" />
+              </View>
               <Text style={styles.emptyTitle}>No Smart Albums</Text>
-              <Text style={styles.emptyText}>Tag some photos with the Magic Wand to create smart albums automatically.</Text>
+              <Text style={styles.emptyText}>Run AI Analysis on your gallery to auto-organize photos by tags like "Nature", "Beach", or "Documents".</Text>
+              
+              <TouchableOpacity 
+                style={[styles.connectNowBtn, { marginTop: 30 }]}
+                onPress={() => {
+                  Alert.alert('AI Analysis', 'Start analyzing all photos in your gallery?', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Analyze All', onPress: async () => {
+                      setIsTagging(true);
+                      try {
+                        const token = await Storage.getItem('authToken');
+                        for (const p of photos) {
+                           if (p.tags && p.tags.length > 0) continue;
+                           await fetch(`${BACKEND_URL}/api/ai/tag/${p.id}`, {
+                             method: 'POST',
+                             headers: { 'Authorization': `Bearer ${token}` }
+                           });
+                        }
+                        await loadGallery();
+                        await fetchSmartAlbums();
+                        Alert.alert('Magic Complete', 'Your Smart Albums have been updated!');
+                      } catch (e) {
+                        console.error(e);
+                      } finally {
+                        setIsTagging(false);
+                      }
+                    }}
+                  ]);
+                }}
+              >
+                {isTagging ? <ActivityIndicator color="#3b82f6" /> : <Text style={styles.connectNowText}>⚡ Run Magic Analysis</Text>}
+              </TouchableOpacity>
             </View>
           }
         />
