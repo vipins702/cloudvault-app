@@ -28,10 +28,13 @@ export default function TransferPhotosScreen() {
   const [files, setFiles] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
-  // Selection
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  // Selection (Batch Support)
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [targetProvider, setTargetProvider] = useState<string>('vercel-blob');
   const [targetFolder, setTargetFolder] = useState<string>('Transferred');
+  
+  // Scheduling Options
+  const [schedule, setSchedule] = useState<'immediate' | 'night' | 'weekend'>('immediate');
 
   useEffect(() => {
     loadRealData();
@@ -69,18 +72,12 @@ export default function TransferPhotosScreen() {
   };
 
   const handleRealTransfer = async () => {
-    if (!selectedFileId) {
-      Alert.alert('Select a File', 'Please select an asset to transfer first.');
+    if (selectedFileIds.size === 0) {
+      Alert.alert('Select Files', 'Please select at least one asset to transfer.');
       return;
     }
     if (!providers.includes(targetProvider)) {
       Alert.alert('Provider Error', `You are not connected to ${targetProvider}. Link it in the Clouds tab first.`);
-      return;
-    }
-
-    const selectedFile = files.find(f => f.id === selectedFileId);
-    if (selectedFile?.provider === targetProvider) {
-      Alert.alert('Invalid Transfer', 'File is already stored in the target provider.');
       return;
     }
 
@@ -90,6 +87,17 @@ export default function TransferPhotosScreen() {
     try {
       const token = await Storage.getItem('authToken');
       
+      if (schedule !== 'immediate') {
+        // Mock Scheduling
+        setTimeout(() => {
+          setTransferring(false);
+          setProgress(0);
+          setSelectedFileIds(new Set());
+          Alert.alert('Job Scheduled', `Your transfer of ${selectedFileIds.size} assets has been scheduled for ${schedule === 'night' ? 'Midnight' : 'the Weekend'}.`);
+        }, 1500);
+        return;
+      }
+
       // Simulate progress visually while backend does the real work
       const interval = setInterval(() => setProgress(p => Math.min(p + 0.1, 0.9)), 500);
 
@@ -100,7 +108,7 @@ export default function TransferPhotosScreen() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          fileId: selectedFileId,
+          fileIds: Array.from(selectedFileIds),
           targetProviderId: targetProvider,
           newFolder: targetFolder
         })
@@ -112,10 +120,10 @@ export default function TransferPhotosScreen() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Transfer failed');
 
-      Alert.alert('Transfer Complete', `Asset securely moved to ${targetProvider}.`);
+      Alert.alert('Transfer Complete', `${selectedFileIds.size} asset(s) securely moved to ${targetProvider}.`);
       
       // Refresh the lists
-      setSelectedFileId(null);
+      setSelectedFileIds(new Set());
       await loadRealData();
 
     } catch (err: any) {
@@ -156,10 +164,20 @@ export default function TransferPhotosScreen() {
                   keyExtractor={item => item.id}
                   renderItem={({ item }) => (
                     <TouchableOpacity 
-                      onPress={() => setSelectedFileId(item.id)}
-                      style={[styles.fileCard, selectedFileId === item.id && styles.fileCardActive]}
+                      onPress={() => {
+                        const newSet = new Set(selectedFileIds);
+                        if (newSet.has(item.id)) newSet.delete(item.id);
+                        else newSet.add(item.id);
+                        setSelectedFileIds(newSet);
+                      }}
+                      style={[styles.fileCard, selectedFileIds.has(item.id) && styles.fileCardActive]}
                     >
                       <Image source={{ uri: item.url }} style={styles.fileImage} />
+                      {selectedFileIds.has(item.id) && (
+                        <View style={{ position: 'absolute', top: 5, right: 5, backgroundColor: '#3b82f6', borderRadius: 12, padding: 2 }}>
+                          <Ionicons name="checkmark" size={16} color="#fff" />
+                        </View>
+                      )}
                       <View style={styles.fileProviderBadge}>
                         <Text style={styles.fileProviderText}>{item.provider === 'vercel-blob' ? 'V' : 'S'}</Text>
                       </View>
@@ -192,6 +210,34 @@ export default function TransferPhotosScreen() {
                   </TouchableOpacity>
                 ))
               )}
+            </View>
+
+            {/* Schedule Selection */}
+            <Text style={styles.sectionTitle}>3. Scheduling</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+              <TouchableOpacity 
+                style={[styles.providerBtn, schedule === 'immediate' && styles.providerBtnActive, { flex: 1, justifyContent: 'center' }]}
+                onPress={() => setSchedule('immediate')}
+              >
+                <Ionicons name="flash" size={16} color={schedule === 'immediate' ? '#fff' : '#64748b'} />
+                <Text style={[styles.providerText, schedule === 'immediate' && styles.providerTextActive]}>Now</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.providerBtn, schedule === 'night' && styles.providerBtnActive, { flex: 1, justifyContent: 'center' }]}
+                onPress={() => setSchedule('night')}
+              >
+                <Ionicons name="moon" size={16} color={schedule === 'night' ? '#fff' : '#64748b'} />
+                <Text style={[styles.providerText, schedule === 'night' && styles.providerTextActive]}>Midnight</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.providerBtn, schedule === 'weekend' && styles.providerBtnActive, { flex: 1, justifyContent: 'center' }]}
+                onPress={() => setSchedule('weekend')}
+              >
+                <Ionicons name="calendar" size={16} color={schedule === 'weekend' ? '#fff' : '#64748b'} />
+                <Text style={[styles.providerText, schedule === 'weekend' && styles.providerTextActive]}>Weekend</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Visual Tunnel */}

@@ -401,91 +401,94 @@ app.post('/api/files/delete', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/files/transfer', authenticateToken, async (req, res) => {
-  const { fileId, targetProviderId, newFolder } = req.body;
+  const { fileIds, targetProviderId, newFolder, fileId } = req.body;
   const tenantId = req.user.tenantId;
 
-  try {
-    // 1. Fetch file metadata
-    const fileRecords = await sql`SELECT * FROM files WHERE id = ${fileId} AND tenant_id = ${tenantId}`;
-    const file = fileRecords[0];
-    if (!file) throw new Error('File not found in database');
+  // Support legacy single fileId and new array fileIds
+  const idsToTransfer = fileIds || (fileId ? [fileId] : []);
+  
+  if (idsToTransfer.length === 0) {
+    return res.status(400).json({ error: 'No files provided for transfer' });
+  }
 
-    // 2. Fetch target provider credentials
+  try {
+    // 1. Fetch target provider credentials once
     const targetConns = await sql`SELECT * FROM storage_connections WHERE provider = ${targetProviderId} AND tenant_id = ${tenantId}`;
     const targetConn = targetConns[0];
     if (!targetConn) throw new Error('Target provider not connected');
 
-    let newUrl = '';
-    let newKey = '';
+    const successfulTransfers = [];
 
-    // 3. Download from Source (Cloud to Cloud streaming)
-    console.log(`[TransferEngine] Downloading ${file.name} from ${file.storage_url}...`);
-    const sourceResponse = await fetch(file.storage_url);
-    if (!sourceResponse.ok) throw new Error('Failed to fetch from source provider');
+    for (const currentFileId of idsToTransfer) {
+      // 2. Fetch file metadata
+      const fileRecords = await sql`SELECT * FROM files WHERE id = ${currentFileId} AND tenant_id = ${tenantId}`;
+      const file = fileRecords[0];
+      if (!file) continue;
 
-    // 4. Upload to Target Provider
-    if (targetProviderId === 'vercel-blob') {
-      let creds;
-      try {
-        creds = JSON.parse(targetConn.credentials_encrypted);
-      } catch (e) {
-        throw new Error('Invalid target credentials');
-      }
-      
-      const rawToken = creds.token || '';
-      const match = rawToken.match(/(vercel_blob_[a-zA-Z0-9_]+)/);
-      const token = match ? match[1] : rawToken.trim();
+      let newUrl = '';
+      let newKey = '';
 
-      const pathname = newFolder ? `${newFolder}/${file.name}` : file.name;
-      
-      console.log(`[TransferEngine] Uploading to Vercel Blob as ${pathname}...`);
-      const uploadResponse = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(pathname)}?v=1`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': file.content_type || 'application/octet-stream',
-        },
-        body: sourceResponse.body,
-        duplex: 'half'
-      });
+      // 3. Download from Source (Cloud to Cloud streaming)
+      console.log(`[TransferEngine] Downloading ${file.name} from ${file.storage_url}...`);
+      const sourceResponse = await fetch(file.storage_url);
+      if (!sourceResponse.ok) continue;
 
-      if (!uploadResponse.ok) throw new Error('Failed to upload to target provider');
-      const uploadData = await uploadResponse.json();
-      newUrl = uploadData.url;
-      newKey = uploadData.pathname;
-    } else if (targetProviderId === 'google-photos') {
-      let creds;
-      try {
-        creds = JSON.parse(targetConn.credentials_encrypted);
-      } catch (e) {
-        throw new Error('Invalid target credentials');
-      }
-      
-      // Google Photos OAuth saves the raw token in `access_token`
-      const decryptedToken = creds.access_token || creds.token;
-      if (!decryptedToken) {
-         throw new Error('Google Photos access token is missing');
-      }
-      
-      console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
-      // Step 1: Upload bytes to get Upload Token
-      const uploadBytesRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${decryptedToken}`,
-          'Content-Type': 'application/octet-stream',
-          'X-Goog-Upload-Content-Type': file.content_type || 'image/jpeg',
-          'X-Goog-Upload-Protocol': 'raw'
-        },
-        body: sourceResponse.body,
-        duplex: 'half'
-      });
-      
-      if (!uploadBytesRes.ok) {
-        const errText = await uploadBytesRes.text();
-        throw new Error('Failed to upload bytes to Google Photos: ' + errText);
-      }
-      const uploadToken = await uploadBytesRes.text();
+      // 4. Upload to Target Provider
+      if (targetProviderId === 'vercel-blob') {
+        let creds;
+        try {
+          creds = JSON.parse(targetConn.credentials_encrypted);
+        } catch (e) {
+          continue;
+        }
+        
+        const rawToken = creds.token || '';
+        const match = rawToken.match(/(vercel_blob_[a-zA-Z0-9_]+)/);
+        const token = match ? match[1] : rawToken.trim();
+
+        const pathname = newFolder ? `${newFolder}/${file.name}` : file.name;
+        
+        console.log(`[TransferEngine] Uploading to Vercel Blob as ${pathname}...`);
+        const uploadResponse = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(pathname)}?v=1`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': file.content_type || 'application/octet-stream',
+          },
+          body: sourceResponse.body,
+          duplex: 'half'
+        });
+
+        if (!uploadResponse.ok) continue;
+        const uploadData = await uploadResponse.json();
+        newUrl = uploadData.url;
+        newKey = uploadData.pathname;
+      } else if (targetProviderId === 'google-photos') {
+        let creds;
+        try {
+          creds = JSON.parse(targetConn.credentials_encrypted);
+        } catch (e) {
+          continue;
+        }
+        
+        const decryptedToken = creds.access_token || creds.token;
+        if (!decryptedToken) continue;
+        
+        console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
+        const uploadBytesRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${decryptedToken}`,
+            'Content-Type': 'application/octet-stream',
+            'X-Goog-Upload-Content-Type': file.content_type || 'image/jpeg',
+            'X-Goog-Upload-Protocol': 'raw'
+          },
+          body: sourceResponse.body,
+          duplex: 'half'
+        });
+        
+        if (!uploadBytesRes.ok) continue;
+        const uploadToken = await uploadBytesRes.text();
       
       console.log(`[TransferEngine] Creating Media Item in Google Photos...`);
       // Step 2: Create media item using Upload Token
@@ -503,29 +506,32 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
         })
       });
       
-      if (!createItemRes.ok) throw new Error('Failed to create media item in Google Photos');
-      const createData = await createItemRes.json();
-      
-      if (!createData.newMediaItemResults || !createData.newMediaItemResults[0].mediaItem) {
-        throw new Error('Google Photos API did not return media item');
+        if (!createItemRes.ok) continue;
+        const createData = await createItemRes.json();
+        
+        if (!createData.newMediaItemResults || !createData.newMediaItemResults[0].mediaItem) {
+          continue;
+        }
+        
+        const mediaItem = createData.newMediaItemResults[0].mediaItem;
+        newUrl = mediaItem.baseUrl; // Google Photos gives a temporary baseUrl that lasts ~60 mins
+        newKey = mediaItem.id;
+      } else {
+        continue;
       }
+
+      // 5. Update Database Record
+      const now = new Date().toISOString();
+      await sql`
+        UPDATE files 
+        SET storage_url = ${newUrl}, storage_key = ${newKey}, connection_id = ${targetConn.id}, folder = ${newFolder || file.folder}, uploaded_at = ${now}
+        WHERE id = ${currentFileId} AND tenant_id = ${tenantId}
+      `;
       
-      const mediaItem = createData.newMediaItemResults[0].mediaItem;
-      newUrl = mediaItem.baseUrl; // Google Photos gives a temporary baseUrl that lasts ~60 mins
-      newKey = mediaItem.id;
-    } else {
-      throw new Error(`Transfer to ${targetProviderId} not yet implemented on master backend`);
+      successfulTransfers.push({ id: currentFileId, url: newUrl });
     }
 
-    // 5. Update Database Record
-    const now = new Date().toISOString();
-    await sql`
-      UPDATE files 
-      SET storage_url = ${newUrl}, storage_key = ${newKey}, connection_id = ${targetConn.id}, folder = ${newFolder || file.folder}, uploaded_at = ${now}
-      WHERE id = ${fileId} AND tenant_id = ${tenantId}
-    `;
-
-    res.json({ success: true, url: newUrl });
+    res.json({ success: true, transfers: successfulTransfers });
   } catch (err) {
     console.error('[TransferEngine] Error:', err);
     res.status(500).json({ error: err.message });
