@@ -10,7 +10,8 @@ import {
   StatusBar,
   Dimensions,
   FlatList,
-  Image
+  Image,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -346,8 +347,24 @@ const styles = StyleSheet.create({
   infoBox: { flexDirection: 'row', backgroundColor: 'rgba(59, 130, 246, 0.05)', padding: 16, borderRadius: 16, marginBottom: 30, alignItems: 'center' },
   infoText: { color: '#64748b', fontSize: 12, lineHeight: 18, marginLeft: 12, flex: 1 },
   
-  transferBtn: { backgroundColor: '#3b82f6', padding: 20, borderRadius: 20, alignItems: 'center', shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15 },
-  btnDisabled: { backgroundColor: '#1e293b', shadowOpacity: 0 },
+  transferBtn: { 
+    backgroundColor: '#3b82f6', padding: 20, borderRadius: 20, alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15
+      },
+      web: {
+        boxShadow: '0px 8px 15px rgba(59, 130, 246, 0.3)'
+      }
+    })
+  },
+  btnDisabled: { 
+    backgroundColor: '#1e293b',
+    ...Platform.select({
+      ios: { shadowOpacity: 0 },
+      web: { boxShadow: 'none' }
+    })
+  },
   btnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   row: { flexDirection: 'row', alignItems: 'center' },
   emptyCloudContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 20, width: '100%' },

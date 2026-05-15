@@ -1160,8 +1160,14 @@ const styles = StyleSheet.create({
   badge: { 
     position: 'absolute', bottom: 6, right: 6, 
     borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4 
-  },
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4
+      },
+      web: {
+        boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.4)'
+      }
+    })  },
   badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingBox: { alignItems: 'center' },
@@ -1226,8 +1232,17 @@ const styles = StyleSheet.create({
     width: 60, height: 60, borderRadius: 30,
     backgroundColor: '#3b82f6',
     justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12,
-    elevation: 8
+    ...Platform.select({
+      ios: {
+        shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12,
+      },
+      android: {
+        elevation: 8
+      },
+      web: {
+        boxShadow: '0px 8px 12px rgba(59, 130, 246, 0.4)'
+      }
+    })
   },
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',

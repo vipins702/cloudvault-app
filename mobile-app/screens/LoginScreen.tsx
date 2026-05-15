@@ -128,11 +128,13 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     borderWidth: 1,
     borderColor: '#1e293b',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.4,
-    shadowRadius: 40,
-    elevation: 10
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.4, shadowRadius: 40,
+      },
+      android: { elevation: 10 },
+      web: { boxShadow: '0px 20px 40px rgba(0, 0, 0, 0.4)' }
+    })
   },
   logoContainer: { alignItems: 'center', marginBottom: 15 },
   logoCircle: { 
@@ -142,10 +144,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb', 
     justifyContent: 'center', 
     alignItems: 'center',
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 15
+    ...Platform.select({
+      ios: {
+        shadowColor: '#2563eb', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 15
+      },
+      web: { boxShadow: '0px 8px 15px rgba(37, 99, 235, 0.5)' }
+    })
   },
   logoText: { fontSize: 32, fontWeight: '900', color: '#fff', textAlign: 'center', letterSpacing: -1 },
   subtitleText: { color: '#64748b', textAlign: 'center', marginBottom: 35, fontSize: 13, fontWeight: '500' },
@@ -171,12 +175,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     marginTop: 10,
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8
+    ...Platform.select({
+      ios: {
+        shadowColor: '#2563eb', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8
+      },
+      web: { boxShadow: '0px 4px 8px rgba(37, 99, 235, 0.3)' }
+    })
   },
-  buttonDisabled: { backgroundColor: '#1e293b', shadowOpacity: 0 },
+  buttonDisabled: { 
+    backgroundColor: '#1e293b',
+    ...Platform.select({
+      ios: { shadowOpacity: 0 },
+      web: { boxShadow: 'none' }
+    })
+  },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold', letterSpacing: 0.5 },
   demoBox: { marginTop: 20, padding: 10, backgroundColor: 'rgba(37, 99, 235, 0.1)', borderRadius: 10 },
   demoText: { color: '#60a5fa', fontSize: 11, textAlign: 'center', fontWeight: '600' },
