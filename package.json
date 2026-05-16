@@ -31,6 +31,7 @@
     "lucide-react": "^0.563.0",
     "openai": "^6.37.0",
     "pngjs": "^7.0.0",
+    "png-js": "^1.0.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "3.4.0",
