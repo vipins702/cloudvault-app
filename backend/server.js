@@ -54,7 +54,7 @@ const authenticateToken = async (req, res, next) => {
   try {
     // True Database Session Validation (Matching Web App)
     const sessions = await sql`
-      SELECT s.*, u.email, u.name 
+      SELECT s.*, u.email, u.name, u.role, u.plan_tier 
       FROM sessions s
       JOIN users u ON s.user_id = u.id
       WHERE s.token = ${token}
@@ -75,7 +75,9 @@ const authenticateToken = async (req, res, next) => {
       id: session.user_id,
       tenantId: session.tenant_id,
       email: session.email,
-      name: session.name
+      name: session.name,
+      role: session.role,
+      planTier: session.plan_tier
     };
 
     next();
@@ -192,7 +194,7 @@ app.post('/api/login', async (req, res) => {
 
     res.json({
       token: sessionToken,
-      user: { id: user.id, email: user.email, name: user.name, tenantId: user.tenant_id }
+      user: { id: user.id, email: user.email, name: user.name, tenantId: user.tenant_id, role: user.role, planTier: user.plan_tier }
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -201,7 +203,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/verify-token', authenticateToken, (req, res) => {
-  res.json({ id: req.user.id, email: req.user.email, tenantId: req.user.tenantId });
+  res.json({ id: req.user.id, email: req.user.email, tenantId: req.user.tenantId, role: req.user.role, planTier: req.user.planTier });
 });
 
 // ========== GALLERY ROUTES ==========
@@ -454,20 +456,49 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
     // Using base64 length roughly gives size in bytes
     const sizeBytes = Math.round((base64Data.length * 3) / 4);
 
-    // User requested manual AI tagging only to save costs. 
-    // AI is NOT called automatically on upload anymore.
-    const tags = [];
+    let tags = [];
+    let metadata = {};
+    let phash = null;
+    
+    // 1. Calculate pHash for duplicate detection (Runs for all users)
+    try {
+      console.log(`[UploadEngine] Calculating pHash for ${fileName}...`);
+      phash = await AIService.calculatePHash(base64Data, contentType);
+    } catch (phashErr) {
+      console.error('[UploadEngine] pHash calculation failed:', phashErr.message);
+    }
+
+    // 2. Auto-tagging for premium users
+    if (req.user.planTier === 'premium') {
+      try {
+        console.log(`[UploadEngine] Auto-tagging for premium user...`);
+        // Get Settings
+        let settings = {};
+        const settingsRows = await sql`SELECT * FROM system_settings WHERE id = 'global'`;
+        if (settingsRows[0]) settings = settingsRows[0];
+        
+        const [detectedTags, ocrText] = await Promise.all([
+          AIService.detectObjects(newUrl, fileName, base64Data, settings),
+          AIService.performOCR(base64Data, settings)
+        ]);
+        tags = detectedTags;
+        metadata = { ocr_text: ocrText, processed_at: new Date().toISOString() };
+      } catch (aiErr) {
+        console.error('[UploadEngine] Auto-tagging failed:', aiErr.message);
+        // Don't fail the upload if AI fails
+      }
+    }
 
     await sql`
       INSERT INTO files (
         id, tenant_id, connection_id, storage_key, storage_url, 
         name, content_type, size_bytes, folder, 
-        uploaded_by, uploaded_at, tags
+        uploaded_by, uploaded_at, tags, metadata, phash
       )
       VALUES (
         ${fileId}, ${tenantId}, ${targetConn.id}, ${newKey}, ${newUrl},
         ${fileName}, ${contentType}, ${sizeBytes}, ${folder || ''},
-        ${req.user.id}, ${now}, ${tags}
+        ${req.user.id}, ${now}, ${tags}, ${JSON.stringify(metadata)}::jsonb, ${phash}
       )
     `;
 
@@ -723,11 +754,58 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
   }
 });
 
+// ========== ADMIN ROUTES ==========
+
+app.get('/api/admin/settings', authenticateToken, async (req, res) => {
+  try {
+    // Check if user is admin
+    const users = await sql`SELECT role FROM users WHERE id = ${req.user.id}`;
+    if (!users[0] || users[0].role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admins only.' });
+    }
+
+    const settingsRows = await sql`SELECT * FROM system_settings WHERE id = 'global'`;
+    res.json(settingsRows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/settings', authenticateToken, async (req, res) => {
+  try {
+    // Check if user is admin
+    const users = await sql`SELECT role FROM users WHERE id = ${req.user.id}`;
+    if (!users[0] || users[0].role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admins only.' });
+    }
+
+    const { active_llm_provider, llm_config } = req.body;
+    
+    await sql`
+      INSERT INTO system_settings (id, active_llm_provider, llm_config, updated_at)
+      VALUES ('global', ${active_llm_provider}, ${JSON.stringify(llm_config)}::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET 
+        active_llm_provider = EXCLUDED.active_llm_provider,
+        llm_config = EXCLUDED.llm_config,
+        updated_at = NOW()
+    `;
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ========== AI SERVICE ROUTES ==========
 
 app.post('/api/ai/tag/:id', authenticateToken, async (req, res) => {
   const fileId = req.params.id;
   try {
+    // Check if user is premium
+    if (req.user.planTier !== 'premium') {
+      return res.status(403).json({ error: 'Magic Analysis is a premium feature. Please upgrade your plan.' });
+    }
+
     // 1. Fetch file record
     const files = await sql`SELECT * FROM files WHERE id = ${fileId} AND tenant_id = ${req.user.tenantId}`;
     if (files.length === 0) return res.status(404).json({ error: 'File not found' });

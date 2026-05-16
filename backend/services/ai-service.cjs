@@ -1,8 +1,7 @@
-/**
- * CLOUDVAULT AI SERVICE
- * Handles Duplicate Detection, NSFW Filtering, and Image Analysis
- */
 const OpenAI = require('openai');
+const blockhash = require('blockhash');
+const jpeg = require('jpeg-js');
+const { PNG } = require('pngjs');
 
 const AIService = {
   /**
@@ -43,6 +42,10 @@ const AIService = {
       apiKey = config.qwen_api_key;
       baseURL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
       model = config.qwen_model || 'qwen-vl-max';
+    } else if (provider === 'groq') {
+      apiKey = config.groq_api_key;
+      baseURL = 'https://api.groq.com/openai/v1';
+      model = config.groq_model || 'qwen-32b';
     } else if (provider === 'glm') {
       apiKey = config.glm_api_key;
       baseURL = 'https://open.bigmodel.cn/api/paas/v4/';
@@ -120,9 +123,19 @@ const AIService = {
     const provider = settings.active_llm_provider || 'openai';
     const config = settings.llm_config || {};
     
-    let apiKey = provider === 'gemini' ? (config.gemini_api_key || process.env.GEMINI_API_KEY) : (config.openai_api_key || process.env.OPENAI_API_KEY);
-    let baseURL = provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai/' : undefined;
-    let model = provider === 'gemini' ? (config.gemini_model || 'gemini-1.5-flash') : (config.openai_model || 'gpt-4o-mini');
+    let apiKey = config.openai_api_key || process.env.OPENAI_API_KEY;
+    let baseURL = undefined;
+    let model = config.openai_model || 'gpt-4o-mini';
+
+    if (provider === 'gemini') {
+      apiKey = config.gemini_api_key || process.env.GEMINI_API_KEY;
+      baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+      model = config.gemini_model || 'gemini-1.5-flash';
+    } else if (provider === 'groq') {
+      apiKey = config.groq_api_key;
+      baseURL = 'https://api.groq.com/openai/v1';
+      model = config.groq_model || 'qwen-32b';
+    }
 
     if (!apiKey || !base64Data) return null;
 
@@ -148,33 +161,90 @@ const AIService = {
   },
 
   /**
+   * CALCULATE PERCEPTUAL HASH
+   * Generates a 64-bit hex hash for image similarity.
+   */
+  calculatePHash: async (base64Data, contentType) => {
+    try {
+      const buffer = Buffer.from(base64Data, 'base64');
+      let imgData;
+
+      if (contentType === 'image/jpeg' || contentType === 'image/jpg') {
+        imgData = jpeg.decode(buffer);
+      } else if (contentType === 'image/png') {
+        const png = PNG.sync.read(buffer);
+        imgData = { width: png.width, height: png.height, data: png.data };
+      }
+
+      if (!imgData) {
+        console.log('[AIService] Unsupported image type for pHash:', contentType);
+        return null;
+      }
+
+      // 16 bits = 16x16 hash = 256 bits (64 hex chars)
+      // Method 2 is bmvbhash which handles arbitrary sizes
+      const hash = blockhash.blockhashData(imgData, 16, 2);
+      return hash;
+    } catch (err) {
+      console.error('[AIService] pHash calculation failed:', err.message);
+      return null;
+    }
+  },
+
+  /**
    * DUPLICATE DETECTION
-   * Returns files grouped by similarity.
+   * Returns files grouped by pHash similarity or exact size.
    */
   findDuplicates: async (sql, tenantId) => {
-    const rows = await sql`
-      SELECT f1.id, f1.name, f1.storage_url, f1.size_bytes, f1.folder
-      FROM files f1
-      WHERE f1.tenant_id = ${tenantId}
-      AND EXISTS (
-        SELECT 1 FROM files f2 
-        WHERE f1.id <> f2.id 
-        AND f1.tenant_id = f2.tenant_id
-        AND f1.size_bytes = f2.size_bytes
-        AND (f1.name = f2.name OR f1.name LIKE '%' || f2.name || '%' OR f2.name LIKE '%' || f1.name || '%')
-      )
-      ORDER BY f1.size_bytes DESC, f1.name
+    // Fetch all files for this tenant
+    const files = await sql`
+      SELECT id, name, storage_url, size_bytes, folder, phash
+      FROM files
+      WHERE tenant_id = ${tenantId}
     `;
 
-    // Grouping by size and name similarity for the UI
-    const groups = {};
-    rows.forEach(row => {
-      const key = `${row.size_bytes}`; // Basic grouping by size
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(row);
-    });
+    const groups = [];
+    const usedIds = new Set();
 
-    return Object.values(groups).filter(g => g.length > 1);
+    for (let i = 0; i < files.length; i++) {
+      const f1 = files[i];
+      if (usedIds.has(f1.id)) continue;
+
+      const currentGroup = [f1];
+
+      for (let j = i + 1; j < files.length; j++) {
+        const f2 = files[j];
+        if (usedIds.has(f2.id)) continue;
+
+        let isDuplicate = false;
+
+        // 1. Check pHash if available
+        if (f1.phash && f2.phash) {
+          const distance = blockhash.hammingDistance(f1.phash, f2.phash);
+          // Distance <= 10 out of 256 bits means very similar
+          if (distance <= 10) {
+            isDuplicate = true;
+          }
+        } 
+        // 2. Fallback to exact size + similar name
+        else if (f1.size_bytes === f2.size_bytes && 
+                 (f1.name === f2.name || f1.name.includes(f2.name) || f2.name.includes(f1.name))) {
+          isDuplicate = true;
+        }
+
+        if (isDuplicate) {
+          currentGroup.push(f2);
+          usedIds.add(f2.id);
+        }
+      }
+
+      if (currentGroup.length > 1) {
+        groups.push(currentGroup);
+        usedIds.add(f1.id);
+      }
+    }
+
+    return groups;
   },
 };
 

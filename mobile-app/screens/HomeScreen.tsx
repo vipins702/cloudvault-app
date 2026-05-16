@@ -41,6 +41,7 @@ export default function HomeScreen() {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTagging, setIsTagging] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
   // Upload State
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -78,7 +79,13 @@ export default function HomeScreen() {
   useEffect(() => {
     loadGallery();
     fetchProviders();
+    loadUser();
   }, []);
+
+  const loadUser = async () => {
+    const userStr = await Storage.getItem('user');
+    if (userStr) setUser(JSON.parse(userStr));
+  };
 
   const fetchProviders = async () => {
     try {
@@ -150,6 +157,13 @@ export default function HomeScreen() {
 
   const handleAITagging = async () => {
     if (selectedFileIds.size === 0) return;
+    
+    // Check if user is premium
+    if (user?.planTier !== 'premium') {
+      Alert.alert('Premium Feature', 'Magic Analysis is restricted to Premium plan users. Please upgrade to unlock.');
+      return;
+    }
+
     setIsTagging(true);
     try {
       const ids = Array.from(selectedFileIds);
@@ -1129,7 +1143,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
+  container: { flex: 1, backgroundColor: '#060b13' },
   header: { 
     paddingHorizontal: 20, 
     paddingVertical: 14, 
@@ -1137,7 +1151,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b'
+    borderBottomColor: '#0f172a'
   },
   headerSelectionMode: {
     backgroundColor: '#3b82f6',
@@ -1151,18 +1165,18 @@ const styles = StyleSheet.create({
     marginRight: 12 
   },
   headerTitle: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
-  subtitle: { color: '#475569', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  subtitle: { color: '#64748b', fontSize: 12, marginTop: 2, fontWeight: '500' },
   headerActions: { flexDirection: 'row', gap: 8 },
   actionBtn: { 
     width: 38, height: 38, borderRadius: 12, 
-    backgroundColor: '#1e293b', 
+    backgroundColor: '#0f172a', 
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: '#334155'
+    borderWidth: 1, borderColor: '#1e293b'
   },
   filterBar: {
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b'
+    borderBottomColor: '#0f172a'
   },
   filterScroll: {
     paddingHorizontal: 16,
@@ -1171,19 +1185,19 @@ const styles = StyleSheet.create({
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#0f172a',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: '#1e293b'
   },
   filterChipActive: {
     backgroundColor: '#3b82f6',
     borderColor: '#2563eb'
   },
   filterChipText: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 13,
     fontWeight: '600'
   },
@@ -1194,11 +1208,11 @@ const styles = StyleSheet.create({
   item: { 
     width: ITEM_SIZE, height: ITEM_SIZE, 
     margin: GAP / 2, 
-    borderRadius: 8, 
+    borderRadius: 12, 
     overflow: 'hidden', 
-    backgroundColor: '#1e293b',
-    borderWidth: 2,
-    borderColor: 'transparent'
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b'
   },
   itemSelected: {
     borderColor: '#3b82f6',
@@ -1208,7 +1222,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 80,
     flexDirection: 'row',
-    marginBottom: 8
+    marginBottom: 8,
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 8
   },
   folderContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   folderIcon: { 
@@ -1216,14 +1233,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59,130,246,0.1)', 
     justifyContent: 'center', alignItems: 'center' 
   },
-  folderName: { color: '#94a3b8', fontSize: 11, fontWeight: '700', marginTop: 6 },
+  folderName: { color: '#64748b', fontSize: 11, fontWeight: '700', marginTop: 6 },
   photoContent: { flex: 1, position: 'relative' },
   photoContentList: { flexDirection: 'row', alignItems: 'center' },
   image: { width: '100%', height: '100%' },
-  imageList: { width: 80, height: '100%', borderRadius: 8 },
+  imageList: { width: 64, height: 64, borderRadius: 8 },
   listDetails: { flex: 1, paddingHorizontal: 12, justifyContent: 'center' },
   listName: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  listDate: { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
+  listDate: { color: '#64748b', fontSize: 12, marginBottom: 8 },
   listBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   listBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold', marginLeft: 4 },
   imageOverlay: { 
@@ -1249,16 +1266,16 @@ const styles = StyleSheet.create({
   badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingBox: { alignItems: 'center' },
-  loadingText: { color: '#475569', marginTop: 16, fontWeight: '600', fontSize: 14 },
+  loadingText: { color: '#64748b', marginTop: 16, fontWeight: '600', fontSize: 14 },
   empty: { marginTop: 80, alignItems: 'center', paddingHorizontal: 40 },
   emptyIcon: { 
     width: 80, height: 80, borderRadius: 24, 
-    backgroundColor: '#1e293b', 
+    backgroundColor: '#0f172a', 
     justifyContent: 'center', alignItems: 'center', 
     marginBottom: 20 
   },
   emptyTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 8 },
-  emptyText: { color: '#475569', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyText: { color: '#64748b', fontSize: 14, textAlign: 'center', lineHeight: 22 },
   // Full-screen viewer
   viewer: { flex: 1, backgroundColor: '#000' },
   viewerHeader: { 
@@ -1303,32 +1320,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)', 
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 
   },
-  metaText: { color: '#94a3b8', fontSize: 11, marginLeft: 4, fontWeight: '600' },
+  metaText: { color: '#64748b', fontSize: 11, marginLeft: 4, fontWeight: '600' },
   // FAB & Upload Modal
   fab: {
     position: 'absolute', bottom: 20, right: 20,
     width: 60, height: 60, borderRadius: 30,
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#a855f7',
     justifyContent: 'center', alignItems: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12,
-      },
-      android: {
-        elevation: 8
-      },
-      web: {
-        boxShadow: '0px 8px 12px rgba(59, 130, 246, 0.4)'
-      }
-    })
+    shadowColor: '#a855f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8
   },
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'flex-end'
   },
   uploadModal: {
-    backgroundColor: '#1e293b', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24
+    backgroundColor: '#0f172a', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    borderWidth: 1, borderColor: '#1e293b'
   },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20
@@ -1336,15 +1344,15 @@ const styles = StyleSheet.create({
   modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
   uploadPreview: {
     width: '100%', height: 180, borderRadius: 16, marginBottom: 20,
-    borderWidth: 1, borderColor: '#334155'
+    borderWidth: 1, borderColor: '#1e293b'
   },
-  modalLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase' },
+  modalLabel: { color: '#64748b', fontSize: 12, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
   providerSelect: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   providerBtn: { 
     flexDirection: 'row', alignItems: 'center', 
-    backgroundColor: '#0f172a', 
+    backgroundColor: '#060b13', 
     paddingHorizontal: 16, paddingVertical: 12, 
-    borderRadius: 12, borderWidth: 1, borderColor: '#334155' 
+    borderRadius: 12, borderWidth: 1, borderColor: '#1e293b' 
   },
   providerBtnActive: { backgroundColor: 'rgba(59, 130, 246, 0.1)', borderColor: '#3b82f6' },
   providerText: { color: '#64748b', fontWeight: 'bold', marginLeft: 8 },
@@ -1352,18 +1360,18 @@ const styles = StyleSheet.create({
   uploadBtn: { 
     backgroundColor: '#3b82f6', padding: 16, borderRadius: 16, alignItems: 'center' 
   },
-  btnDisabled: { backgroundColor: '#334155', opacity: 0.7 },
+  btnDisabled: { backgroundColor: '#1e293b', opacity: 0.7 },
   uploadBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  docPlaceholder: { backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
+  docPlaceholder: { backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' },
   fabOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 },
   fabMenu: { position: 'absolute', bottom: 90, right: 20, alignItems: 'flex-end', gap: 12 },
-  fabMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#1e293b', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, borderWidth: 1, borderColor: '#334155' },
+  fabMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0f172a', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, borderWidth: 1, borderColor: '#1e293b' },
   fabMenuIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3b82f6', justifyContent: 'center', alignItems: 'center' },
   fabMenuText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  folderModal: { backgroundColor: '#1e293b', margin: 20, borderRadius: 24, padding: 24, width: '90%', alignSelf: 'center', marginBottom: Platform.OS === 'ios' ? 100 : 20 },
-  folderInput: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#334155', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16 },
+  folderModal: { backgroundColor: '#0f172a', margin: 20, borderRadius: 24, padding: 24, width: '90%', alignSelf: 'center', marginBottom: Platform.OS === 'ios' ? 100 : 20, borderWidth: 1, borderColor: '#1e293b' },
+  folderInput: { backgroundColor: '#060b13', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16 },
   inputGroup: { marginBottom: 24 },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', marginHorizontal: 20, marginTop: 12, borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, borderColor: '#334155' },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', marginHorizontal: 20, marginTop: 12, borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, borderColor: '#1e293b' },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, color: '#fff', fontSize: 14 },
   searchClear: { padding: 4 },
@@ -1373,13 +1381,13 @@ const styles = StyleSheet.create({
   ocrContainer: { backgroundColor: 'rgba(59,130,246,0.05)', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(59,130,246,0.1)' },
   ocrTitle: { color: '#60a5fa', fontSize: 10, fontWeight: '900', marginBottom: 8, letterSpacing: 1 },
   ocrText: { color: '#cbd5e1', fontSize: 13, lineHeight: 20 },
-  dupModal: { backgroundColor: '#0f172a', flex: 1, paddingTop: 60 },
+  dupModal: { backgroundColor: '#060b13', flex: 1, paddingTop: 60 },
   dupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
   dupTitle: { color: '#fff', fontSize: 20, fontWeight: '900' },
-  dupGroup: { backgroundColor: '#1e293b', marginHorizontal: 20, marginBottom: 20, borderRadius: 20, padding: 16, borderLeftWidth: 4, borderLeftColor: '#7c3aed' },
+  dupGroup: { backgroundColor: '#0f172a', marginHorizontal: 20, marginBottom: 20, borderRadius: 20, padding: 16, borderLeftWidth: 4, borderLeftColor: '#a855f7' },
   dupGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  dupGroupTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
-  dupItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', padding: 12, borderRadius: 12, marginBottom: 8 },
+  dupGroupTitle: { color: '#64748b', fontSize: 12, fontWeight: 'bold' },
+  dupItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#060b13', padding: 12, borderRadius: 12, marginBottom: 8 },
   dupItemImg: { width: 40, height: 40, borderRadius: 8, marginRight: 12 },
   dupItemInfo: { flex: 1 },
   dupItemName: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
@@ -1391,7 +1399,7 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#fff' },
   dot: { position: 'absolute', top: -2, right: -8, width: 4, height: 4, borderRadius: 2, backgroundColor: '#3b82f6' },
   albumList: { padding: 16 },
-  albumCard: { flex: 1, margin: 8, backgroundColor: '#1e293b', borderRadius: 16, overflow: 'hidden', height: 200 },
+  albumCard: { flex: 1, margin: 8, backgroundColor: '#0f172a', borderRadius: 16, overflow: 'hidden', height: 200, borderWidth: 1, borderColor: '#1e293b' },
   albumCover: { width: '100%', height: 140 },
   albumInfo: { padding: 12 },
   albumName: { color: '#fff', fontSize: 15, fontWeight: 'bold', textTransform: 'capitalize' },
