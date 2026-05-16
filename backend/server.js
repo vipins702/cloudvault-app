@@ -684,7 +684,13 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
         }
         
         const decryptedToken = await getValidGoogleToken(targetConn);
-        if (!decryptedToken) continue;
+        if (!decryptedToken) {
+          await sql`
+            INSERT INTO error_logs (id, tenant_id, user_id, action, error_message, metadata)
+            VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'TRANSFER_FILE', 'Failed to get valid Google token', ${JSON.stringify({ fileId: currentFileId })})
+          `;
+          continue;
+        }
         
         console.log(`[TransferEngine] Uploading bytes to Google Photos API...`);
         const uploadBytesRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
@@ -698,8 +704,15 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
           body: sourceResponse.body,
           duplex: 'half'
         });
-        
-        if (!uploadBytesRes.ok) continue;
+
+        if (!uploadBytesRes.ok) {
+          const errText = await uploadBytesRes.text();
+          await sql`
+            INSERT INTO error_logs (id, tenant_id, user_id, action, error_message, metadata)
+            VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'TRANSFER_FILE', 'Failed to upload bytes to Google Photos', ${JSON.stringify({ fileId: currentFileId, status: uploadBytesRes.status, error: errText })})
+          `;
+          continue;
+        }
         const uploadToken = await uploadBytesRes.text();
       
       console.log(`[TransferEngine] Creating Media Item in Google Photos...`);
@@ -718,10 +731,22 @@ app.post('/api/files/transfer', authenticateToken, async (req, res) => {
         })
       });
       
-        if (!createItemRes.ok) continue;
+        if (!createItemRes.ok) {
+          const errText = await createItemRes.text();
+          await sql`
+            INSERT INTO error_logs (id, tenant_id, user_id, action, error_message, metadata)
+            VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'TRANSFER_FILE', 'Failed to create media item in Google Photos', ${JSON.stringify({ fileId: currentFileId, status: createItemRes.status, error: errText })})
+          `;
+          continue;
+        }
         const createData = await createItemRes.json();
         
         if (!createData.newMediaItemResults || !createData.newMediaItemResults[0].mediaItem) {
+          const itemResult = createData.newMediaItemResults ? createData.newMediaItemResults[0] : null;
+          await sql`
+            INSERT INTO error_logs (id, tenant_id, user_id, action, error_message, metadata)
+            VALUES (${crypto.randomUUID()}, ${tenantId}, ${req.user.id}, 'TRANSFER_FILE', 'Google Photos API did not return media item', ${JSON.stringify({ fileId: currentFileId, result: itemResult })})
+          `;
           continue;
         }
         
