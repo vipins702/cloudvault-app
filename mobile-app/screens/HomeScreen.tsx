@@ -20,9 +20,20 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { decode as atob } from 'base-64';
 import { DbService } from '../utils/db';
 import { Storage } from '../utils/storage';
 import { BACKEND_URL } from '../utils/constants';
+
+function base64ToArrayBuffer(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 const { width, height } = Dimensions.get('window');
 const COLUMN_COUNT = 3;
@@ -300,41 +311,127 @@ export default function HomeScreen() {
 
     try {
       const token = await Storage.getItem('authToken');
-      let base64Data;
-      if (Platform.OS === 'web') {
-        const fetchRes = await fetch(selectedFile.uri);
-        const blob = await fetchRes.blob();
-        base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = reader.result?.toString().split(',')[1];
-            resolve(base64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
+      
+      if (targetProvider === 'google-photos') {
+        Alert.alert('Uploading', 'Uploading directly to Google Photos to bypass Vercel limits...');
+        
+        // 1. Get Google Token from backend
+        const tokenRes = await fetch(`${BACKEND_URL}/api/connections/google/token`, {
+          headers: { 'Authorization': `Bearer ${token}` }
         });
+        if (!tokenRes.ok) throw new Error('Failed to get Google token. Is Google connected?');
+        const { token: googleToken } = await tokenRes.json();
+
+        // 2. Read file as bytes
+        let fileBytes;
+        if (Platform.OS === 'web') {
+          const fetchRes = await fetch(selectedFile.uri);
+          fileBytes = await fetchRes.blob();
+        } else {
+          const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
+            encoding: 'base64',
+          });
+          fileBytes = base64ToArrayBuffer(base64);
+        }
+
+        // Step 1: Upload raw bytes to Google
+        console.log('[MobileUpload] Uploading bytes to Google...');
+        const uploadRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${googleToken}`,
+            'Content-Type': 'application/octet-stream',
+            'X-Goog-Upload-Content-Type': selectedFile.mimeType || 'image/jpeg',
+            'X-Goog-Upload-Protocol': 'raw'
+          },
+          body: fileBytes
+        });
+
+        if (!uploadRes.ok) throw new Error('Google Photos raw upload failed');
+        const uploadToken = await uploadRes.text();
+
+        // Step 2: Create media item
+        console.log('[MobileUpload] Creating media item...');
+        const createRes = await fetch('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${googleToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            newMediaItems: [{
+              description: selectedFile.name,
+              simpleMediaItem: { uploadToken }
+            }]
+          })
+        });
+
+        if (!createRes.ok) throw new Error('Google Photos media item creation failed');
+        const createData = await createRes.json();
+        
+        const mediaItem = createData.newMediaItemResults[0].mediaItem;
+        const baseUrl = mediaItem.baseUrl;
+        const id = mediaItem.id;
+
+        // Step 3: Tell backend to register the file
+        console.log('[MobileUpload] Registering with backend...');
+        const res = await fetch(`${BACKEND_URL}/api/files/upload`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            fileName: selectedFile.name,
+            contentType: selectedFile.mimeType,
+            targetProviderId: targetProvider,
+            folder: currentPath || '',
+            skipStorageUpload: true,
+            storageUrl: baseUrl,
+            storageKey: id
+          })
+        });
+
+        if (!res.ok) throw new Error('Failed to register file with backend');
+        
       } else {
-        base64Data = await FileSystem.readAsStringAsync(selectedFile.uri, {
-          encoding: 'base64',
+        // ORIGINAL VERCEL BLOB UPLOAD FLOW
+        let base64Data;
+        if (Platform.OS === 'web') {
+          const fetchRes = await fetch(selectedFile.uri);
+          const blob = await fetchRes.blob();
+          base64Data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64 = reader.result?.toString().split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          base64Data = await FileSystem.readAsStringAsync(selectedFile.uri, {
+            encoding: 'base64',
+          });
+        }
+
+        const res = await fetch(`${BACKEND_URL}/api/files/upload`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            fileName: selectedFile.name,
+            contentType: selectedFile.mimeType,
+            base64Data,
+            targetProviderId: targetProvider,
+            folder: currentPath || ''
+          })
         });
+
+        if (!res.ok) throw new Error('Upload failed');
       }
-
-      const res = await fetch(`${BACKEND_URL}/api/files/upload`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          fileName: selectedFile.name,
-          contentType: selectedFile.mimeType,
-          base64Data,
-          targetProviderId: targetProvider,
-          folder: currentPath || ''
-        })
-      });
-
-      if (!res.ok) throw new Error('Upload failed');
       
       Alert.alert('Success', 'Asset uploaded securely to ' + targetProvider);
       setUploadModalVisible(false);

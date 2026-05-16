@@ -270,6 +270,20 @@ app.get('/api/connections', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/connections/google/token', authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const conns = await sql`SELECT * FROM storage_connections WHERE provider = 'google-photos' AND tenant_id = ${tenantId}`;
+    const conn = conns[0];
+    if (!conn) return res.status(404).json({ error: 'Google Photos not connected' });
+
+    const token = await getValidGoogleToken(conn);
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/auth/link-cloud', authenticateToken, async (req, res) => {
   const { provider, token, name } = req.body;
   try {
@@ -354,22 +368,27 @@ app.post('/api/admin/settings', authenticateToken, async (req, res) => {
 // ========== TRANSFER & BULK ROUTES (SaaS Master Engine) ==========
 
 app.post('/api/files/upload', authenticateToken, async (req, res) => {
-  const { fileName, contentType, base64Data, targetProviderId, folder } = req.body;
+  const { fileName, contentType, base64Data, targetProviderId, folder, skipStorageUpload, storageUrl, storageKey } = req.body;
   const tenantId = req.user.tenantId;
 
   try {
-    if (!base64Data) throw new Error("No file data provided");
+    if (!skipStorageUpload && !base64Data) throw new Error("No file data provided");
 
     // 1. Get Target Provider
     const targetConns = await sql`SELECT * FROM storage_connections WHERE provider = ${targetProviderId} AND tenant_id = ${tenantId}`;
     const targetConn = targetConns[0];
     if (!targetConn) throw new Error('Target provider not connected');
 
-    const buffer = Buffer.from(base64Data, 'base64');
     let newUrl = '';
     let newKey = '';
 
-    // 2. Upload to Vercel Blob
+    if (skipStorageUpload) {
+      newUrl = storageUrl;
+      newKey = storageKey;
+      console.log(`[UploadEngine] Skipping storage upload, using provided URL: ${newUrl}`);
+    } else {
+      const buffer = Buffer.from(base64Data, 'base64');
+      // 2. Upload to Vercel Blob
     if (targetProviderId === 'vercel-blob') {
       const creds = JSON.parse(targetConn.credentials_encrypted);
       const rawToken = creds.token || '';
@@ -454,16 +473,32 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
     const fileId = crypto.randomUUID();
     
     // Using base64 length roughly gives size in bytes
-    const sizeBytes = Math.round((base64Data.length * 3) / 4);
+    let sizeBytes = base64Data ? Math.round((base64Data.length * 3) / 4) : 0;
 
     let tags = [];
     let metadata = {};
     let phash = null;
     
+    let dataForAI = base64Data;
+    if (!dataForAI && newUrl) {
+      try {
+        console.log(`[UploadEngine] Fetching image from URL for pHash...`);
+        const imgRes = await fetch(newUrl);
+        const imgBuffer = await imgRes.arrayBuffer();
+        const buffer = Buffer.from(imgBuffer);
+        dataForAI = buffer.toString('base64');
+        sizeBytes = buffer.length; // Get real size
+      } catch (fetchErr) {
+        console.error('[UploadEngine] Failed to fetch image for pHash:', fetchErr.message);
+      }
+    }
+
     // 1. Calculate pHash for duplicate detection (Runs for all users)
     try {
-      console.log(`[UploadEngine] Calculating pHash for ${fileName}...`);
-      phash = await AIService.calculatePHash(base64Data, contentType);
+      if (dataForAI) {
+        console.log(`[UploadEngine] Calculating pHash for ${fileName}...`);
+        phash = await AIService.calculatePHash(dataForAI, contentType);
+      }
     } catch (phashErr) {
       console.error('[UploadEngine] pHash calculation failed:', phashErr.message);
     }
