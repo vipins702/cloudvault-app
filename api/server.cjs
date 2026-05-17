@@ -467,6 +467,7 @@ app.post('/api/files/upload', authenticateToken, async (req, res) => {
     } else {
       throw new Error(`Upload to ${targetProviderId} not yet implemented on master backend`);
     }
+    }
 
     // 3. Insert into Database
     const now = new Date().toISOString();
