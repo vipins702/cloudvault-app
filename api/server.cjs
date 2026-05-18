@@ -58,6 +58,10 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/api/test', (req, res) => {
+  res.json({ message: "Test working" });
+});
+
 // --- UTILS ---
 const hashPassword = (password) => Buffer.from(password).toString('base64');
 
