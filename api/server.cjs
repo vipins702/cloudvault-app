@@ -14,7 +14,16 @@ const AIService = require('./services/ai-service.cjs');
 const app = express();
 const port = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cloudvault-super-secret-key';
-const sql = neon(process.env.VITE_NEON_DB_URL);
+const dbUrl = process.env.VITE_NEON_DB_URL;
+let sql;
+if (dbUrl) {
+  sql = neon(dbUrl);
+} else {
+  console.error("CRITICAL: VITE_NEON_DB_URL is missing!");
+  sql = async (strings, ...values) => {
+    throw new Error("Database connection failed: VITE_NEON_DB_URL is missing. Please set it in Vercel settings.");
+  };
+}
 
 // GOOGLE AUTH CONFIG
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
