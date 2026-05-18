@@ -38,7 +38,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- HEALTH CHECK ---
 app.get('/', (req, res) => {
-  res.json({ status: 'Online', message: 'CloudVault API is running on Vercel' });
+  res.json({ 
+    status: 'Online', 
+    message: 'CloudVault API is running on Vercel',
+    env_check: {
+      db_url: !!process.env.VITE_NEON_DB_URL,
+      google_id: !!process.env.GOOGLE_CLIENT_ID,
+      encryption_key: !!process.env.ENCRYPTION_KEY
+    }
+  });
 });
 
 // --- UTILS ---
